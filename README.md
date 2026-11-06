@@ -47,3 +47,10 @@ Locally the runner starts the agent itself, pins the server to CPUs 0–7 and oh
 ## The rig
 
 Measured runs happen on the cloud rig in us-east-1: a c8gn.4xlarge client and a c8gn.4xlarge server, its process pinned to 4 cores, in one cluster placement group, launched from the `WarefeatsHttpServersBench` stack by GitHub Actions ([`.github/workflows/rig.yml`](.github/workflows/rig.yml)) through an OIDC role, the way the kv-stores and map-tile-servers rigs run. Setting it up is a one-time step with AWS credentials: `just rig-deploy` deploys the stack, then `just setup-oidc` deploys the `http-servers-github-deploy` role and stores its ARN as the `AWS_ROLE_ARN` secret of the `http-servers-bench` environment. After that a run needs only `gh`: `just rig-walk` checks the rig offline, `just rig-cloud <change|frameworks> <smoke|full>` dispatches it (`-f candidates=<list>` replaces the lane's default set), `just rig-watch` follows it, and `just rig-fetch <run id>` downloads each pass's artifact into `runs/raw/<run id>/`. Each pass launches a fresh pair, hands both the dispatched commit through the rig's bucket, builds the candidates on the client, starts the agent on the server, prints `run.ts`'s log into the job's log as it goes, collects the results with a `metadata.json`, and terminates both instances. A full framework run is three passes, one after another, each on its own pair; a full change run is six passes on one pair.
+
+## Runs
+
+Each measured run keeps its report, results, metadata and build record in `runs/<GitHub run id>/`.
+
+- [42155947807](runs/42155947807/report.md) (2026-11-06): the change lane, six passes on one pair, on the `json`, `16k`, `323k` and `slow-323k` cells.
+- [42170865139](runs/42170865139/report.md) (2026-11-06): the change lane again, six passes on another pair, with the `323k-fresh`, `slow-323k-fresh` and `file` cells added.

@@ -1,0 +1,89 @@
+{
+  "builtAt": "2026-11-06T05:53:38.691Z",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+  "arch": "arm64",
+  "candidates": [
+    {
+      "id": "actix-web-81bb997",
+      "label": "actix-web main 81bb997",
+      "framework": "actix-web",
+      "source": {
+        "kind": "git",
+        "repo": "https://github.com/actix/actix-web",
+        "rev": "81bb9971ed888b9194cefb5c5d7b093a97de10c2"
+      },
+      "binary": "/opt/bench/build/bin/actix-web-81bb997",
+      "sha256": "05774c456a153b9b78a9fcfa9b4f64b1b14d8b1326e9263a296a6525886c7f47",
+      "bytes": 6735912,
+      "seconds": 20.8,
+      "versions": {
+        "tokio": "1.54.1",
+        "mio": "1.2.4",
+        "bytes": "1.12.1",
+        "socket2": "0.6.5",
+        "http": "0.2.12",
+        "actix-http": "3.20.0",
+        "actix-web": "4.18.1",
+        "actix-server": "2.10.0",
+        "actix-rt": "2.15.0",
+        "actix-files": "0.7.3",
+        "serde_json": "1.0.154"
+      }
+    },
+    {
+      "id": "actix-web-pr4302",
+      "label": "actix-web #4302 2a3f201",
+      "framework": "actix-web",
+      "source": {
+        "kind": "git",
+        "repo": "https://github.com/johncarmack1984/actix-web",
+        "rev": "2a3f2019d2be1ecbd005916135c0b69a74cf2038"
+      },
+      "binary": "/opt/bench/build/bin/actix-web-pr4302",
+      "sha256": "fc0d74ea0c7cae540d8d2304e7c95ec2e208cdacba2bc4562f4ff9532ca2310e",
+      "bytes": 6736960,
+      "seconds": 18.1,
+      "versions": {
+        "tokio": "1.54.1",
+        "mio": "1.2.4",
+        "bytes": "1.12.1",
+        "socket2": "0.6.5",
+        "http": "0.2.12",
+        "actix-http": "3.20.0",
+        "actix-web": "4.18.1",
+        "actix-server": "2.10.0",
+        "actix-rt": "2.15.0",
+        "actix-files": "0.7.3",
+        "serde_json": "1.0.154"
+      }
+    },
+    {
+      "id": "axum-40d061f",
+      "label": "axum main 40d061f",
+      "framework": "axum",
+      "source": {
+        "kind": "git",
+        "repo": "https://github.com/tokio-rs/axum",
+        "rev": "40d061fdacd468217c7a609bede16357276b6c40"
+      },
+      "binary": "/opt/bench/build/bin/axum-40d061f",
+      "sha256": "a20a103575aa5b0e001767e6de1d1ec3408f93aa90ede1d9f838750326a016dc",
+      "bytes": 2343816,
+      "seconds": 9.2,
+      "versions": {
+        "tokio": "1.54.1",
+        "mio": "1.2.4",
+        "bytes": "1.12.1",
+        "socket2": "0.6.5",
+        "hyper": "1.12.0",
+        "hyper-util": "0.1.21",
+        "http": "1.5.0",
+        "axum": "0.8.9",
+        "axum-core": "0.5.6",
+        "tower-http": "0.6.11",
+        "serde_json": "1.0.154"
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    uses: warefeats/workflows/.github/workflows/bun-verify.yml@main
+
+  # Every candidate of the framework lane builds from its pinned release.
+  servers:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - run: bun install --frozen-lockfile
+      - run: bun run src/build.ts --lane=frameworks

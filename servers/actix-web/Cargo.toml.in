@@ -1,0 +1,16 @@
+# The build (src/build.ts) writes one project per candidate from this template, filling the marker
+# lines below: the actix-web dependency (an exact crates.io version, or a git commit) and the
+# [patch] table that takes every crate of actix-web's workspace from that same commit.
+[package]
+name = "bench-actix-web"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+@FRAMEWORK@
+bench-common = { path = "@COMMON@" }
+
+[workspace]
+
+@PATCH@

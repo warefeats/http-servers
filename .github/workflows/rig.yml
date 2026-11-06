@@ -1,0 +1,380 @@
+name: Cloud rig
+
+# A run on the cloud rig of docs/adr/0001: a c8gn.4xlarge client and a c8g.xlarge server from the
+# WarefeatsHttpServersBench stack's launch templates, in its cluster placement group, driven over SSM through the
+# http-servers-github-deploy role, the way kv-stores and map-tile-servers run theirs. The client builds the
+# candidates (src/build.ts), the server runs each under src/agent.ts, and the client measures them (src/run.ts).
+# What each instance runs is scripts/ssm/*.sh, rendered by scripts/rig-lib.sh. The framework lane's full run is
+# three passes, each on a fresh pair, one after another; every other run is one pass on one pair. Run
+# scripts/rig-walk.sh (just rig-walk) before any dispatch.
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "change: a commit against its base; frameworks: the headline"
+        type: choice
+        options: [change, frameworks]
+        default: change
+      mode:
+        description: "smoke: every cell with shortened steps; full: the measured run"
+        type: choice
+        options: [smoke, full]
+        default: smoke
+      candidates:
+        description: "Candidates for build.ts and run.ts (empty: the lane's default set)"
+        required: false
+        default: ""
+      region:
+        description: "AWS region, the stack's"
+        required: false
+        default: us-east-1
+
+concurrency:
+  group: http-servers-rig
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  STACK_NAME: WarefeatsHttpServersBench
+  PROJECT_TAG: http-servers-bench
+  # the CLI's own retries for throttled calls, under rig-lib.sh's waits
+  AWS_RETRY_MODE: adaptive
+  AWS_MAX_ATTEMPTS: "10"
+
+jobs:
+  pass:
+    name: ${{ inputs.lane }} ${{ inputs.mode }}, pass ${{ matrix.pass }}
+    runs-on: ubuntu-24.04
+    environment: http-servers-bench
+    timeout-minutes: 330
+    strategy:
+      # docs/adr/0001, Passes: three passes for the framework lane, each on a fresh pair, one after another, and a
+      # failed one stops the rest; the change lane's ten passes run inside run.ts on one pair
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        pass: ${{ fromJSON(inputs.lane == 'frameworks' && inputs.mode == 'full' && '[1, 2, 3]' || '[1]') }}
+    env:
+      LANE: ${{ inputs.lane }}
+      MODE: ${{ inputs.mode }}
+      CANDIDATES: ${{ inputs.candidates }}
+      PASS: ${{ matrix.pass }}
+      PASSES: ${{ inputs.lane == 'frameworks' && inputs.mode == 'full' && 3 || 1 }}
+      RUN_ID: ${{ inputs.lane }}-${{ inputs.mode }}-${{ github.run_id }}-${{ github.run_attempt }}-p${{ matrix.pass }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+          role-duration-seconds: 21600
+          role-session-name: http-servers-rig-${{ github.run_id }}-p${{ matrix.pass }}
+
+      - name: Check the inputs and read the stack
+        run: |
+          set -euo pipefail
+          # the candidates reach a root shell on each instance: ids, versions, commits and separators only
+          if [[ ! $CANDIDATES =~ ^[A-Za-z0-9._:@/+=,~-]*$ ]]; then
+            echo "::error::candidates may hold letters, digits and . _ : @ / + = , ~ - only"
+            exit 1
+          fi
+          outputs=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query 'Stacks[0].Outputs' --output json)
+          output() { jq -er --arg k "$1" '.[] | select(.OutputKey == $k) | .OutputValue' <<< "$outputs"; }
+          bucket=$(output ResultsBucketName)
+          server_lt=$(output ServerLtId)
+          client_lt=$(output ClientLtId)
+          placement=$(output PlacementGroup)
+          {
+            echo "BUCKET=$bucket"
+            echo "SERVER_LT=$server_lt"
+            echo "CLIENT_LT=$client_lt"
+            echo "PLACEMENT_GROUP=$placement"
+          } >> "$GITHUB_ENV"
+          echo "run $RUN_ID: lane $LANE, mode $MODE, candidates '$CANDIDATES', pass $PASS of $PASSES"
+
+      - name: Pack the bundle
+        run: |
+          set -euo pipefail
+          # the instances run these from the bundle: a commit without one would only fail there, after the launch
+          for f in bun.lock src/build.ts src/agent.ts src/run.ts; do
+            if ! git cat-file -e "HEAD:$f" 2>/dev/null; then
+              echo "::error::$f is not in commit $(git rev-parse --short HEAD)"
+              exit 1
+            fi
+          done
+          git archive --format=tar.gz -o "$RUNNER_TEMP/bundle.tgz" HEAD
+          aws s3 cp "$RUNNER_TEMP/bundle.tgz" "s3://$BUCKET/runs/$RUN_ID/bundle.tgz" --only-show-errors
+          echo "bundle of $(git rev-parse --short HEAD): $(du -h "$RUNNER_TEMP/bundle.tgz" | cut -f1)"
+
+      - name: Pick the zone
+        run: |
+          set -euo pipefail
+          lt_type() {
+            aws ec2 describe-launch-template-versions --launch-template-id "$1" --versions "\$Latest" \
+              --query 'LaunchTemplateVersions[0].LaunchTemplateData.InstanceType' --output text
+          }
+          server_type=$(lt_type "$SERVER_LT")
+          client_type=$(lt_type "$CLIENT_LT")
+          want=$(printf '%s\n' "$server_type" "$client_type" | sort -u | wc -l)
+          # the zones that offer both types
+          mapfile -t zones < <(aws ec2 describe-instance-type-offerings --location-type availability-zone \
+            --filters "Name=instance-type,Values=$server_type,$client_type" \
+            --query 'InstanceTypeOfferings[].[Location,InstanceType]' --output text \
+            | sort -u | awk -v want="$want" '{ n[$1]++ } END { for (z in n) if (n[z] == want) print z }' | sort)
+          if [ ${#zones[@]} -eq 0 ]; then
+            echo "::error::no zone in $AWS_REGION offers both $server_type and $client_type"
+            exit 1
+          fi
+          # a cluster placement group stays in the zone of its first launch while it holds instances (terminated
+          # ones too, for a while), so that zone goes first
+          bound=$(aws ec2 describe-instances --filters "Name=placement-group-name,Values=$PLACEMENT_GROUP" \
+            --query 'Reservations[].Instances[].Placement.AvailabilityZone' --output text \
+            | tr '\t' '\n' | grep -v '^$' | sort -u | head -n 1 || true)
+          ordered=()
+          if [ -n "$bound" ] && printf '%s\n' "${zones[@]}" | grep -qx "$bound"; then ordered=("$bound"); fi
+          for z in "${zones[@]}"; do
+            if [ "$z" != "$bound" ]; then ordered+=("$z"); fi
+          done
+          subnets=()
+          for z in "${ordered[@]}"; do
+            s=$(aws ec2 describe-subnets --filters "Name=availability-zone,Values=$z" Name=default-for-az,Values=true \
+              --query 'Subnets[0].SubnetId' --output text)
+            if [ -n "$s" ] && [ "$s" != None ]; then subnets+=("$s"); fi
+          done
+          if [ ${#subnets[@]} -eq 0 ]; then
+            echo "::error::no default subnet in ${ordered[*]}"
+            exit 1
+          fi
+          echo "SUBNETS=${subnets[*]}" >> "$GITHUB_ENV"
+          echo "$server_type and $client_type: zones ${ordered[*]}${bound:+ (the placement group is in $bound)}, subnets ${subnets[*]}"
+
+      - name: Launch the client, then the server in its subnet
+        run: |
+          set -euo pipefail
+          . scripts/rig-lib.sh
+          echo "LAUNCHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          # the network-optimized client is the scarcer type, so it picks the zone and the server follows it
+          read -r -a subnets <<< "$SUBNETS"
+          client=$(launch "$CLIENT_LT" client "${subnets[@]}")
+          read -r client_id client_ip zone subnet <<< "$client"
+          { echo "CLIENT_ID=$client_id"; echo "ZONE=$zone"; } >> "$GITHUB_ENV"
+          echo "client $client_id ($client_ip) in $zone"
+          server=$(launch "$SERVER_LT" server "$subnet")
+          read -r server_id server_ip _ _ <<< "$server"
+          { echo "SERVER_ID=$server_id"; echo "SERVER_IP=$server_ip"; } >> "$GITHUB_ENV"
+          echo "server $server_id ($server_ip) in $zone"
+
+      - name: Wait for SSM
+        run: |
+          set -euo pipefail
+          . scripts/rig-lib.sh
+          wait_online "$CLIENT_ID" "$SERVER_ID"
+
+      - name: Wait for user data, then unpack the bundle on both
+        run: |
+          set -euo pipefail
+          . scripts/rig-lib.sh
+          ssm_run readiness 1200 "$SERVER_ID" "$CLIENT_ID"
+          ssm_run unpack 900 "$SERVER_ID" "$CLIENT_ID"
+
+      - name: Build the candidates on the client
+        run: |
+          set -euo pipefail
+          . scripts/rig-lib.sh
+          ssm_run build 3600 "$CLIENT_ID"
+
+      - name: Start the agent on the server
+        run: |
+          set -euo pipefail
+          . scripts/rig-lib.sh
+          echo "AGENT_SENT=1" >> "$GITHUB_ENV"
+          ssm_run agent 300 "$SERVER_ID"
+
+      - name: Start the run on the client
+        run: |
+          set -euo pipefail
+          . scripts/rig-lib.sh
+          echo "RUN_SENT=1" >> "$GITHUB_ENV"
+          ssm_run run 300 "$CLIENT_ID"
+          echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Follow the run
+        run: |
+          set -euo pipefail
+          . scripts/rig-lib.sh
+          if [ "$MODE" = smoke ]; then minutes=40; else minutes=300; fi
+          deadline=$(($(date +%s) + minutes * 60))
+          log=$RUNNER_TEMP/run.log
+          seen=0
+          # the client copies run.ts's log to the bucket every 30 s: print the whole lines added since the last look
+          show() {
+            aws s3 cp "s3://$BUCKET/runs/$RUN_ID/run.log" "$log" --only-show-errors 2>/dev/null || return 0
+            local total
+            total=$(wc -l < "$log")
+            if [ "$total" -gt "$seen" ]; then
+              sed -n "$((seen + 1)),${total}p" "$log"
+              seen=$total
+            fi
+          }
+          # one status line from the client, or a failure when it does not answer within about three minutes
+          poll() {
+            local id
+            id=$(SSM_DELIVERY_S=60 ssm_send status 60 "$CLIENT_ID") || return 1
+            [ "$(SSM_DELIVERY_S=60 ssm_wait "$id" "$CLIENT_ID" 60)" = Success ] || return 1
+            ssm_output "$id" "$CLIENT_ID"
+          }
+          misses=0
+          state=""
+          while :; do
+            sleep 60
+            show
+            host=$(aws ec2 describe-instances --instance-ids "$CLIENT_ID" --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo unknown)
+            case "$host" in
+              shutting-down | terminated | stopping | stopped)
+                echo "::error::the client is $host"
+                exit 1
+                ;;
+            esac
+            if state=$(poll); then
+              misses=0
+            else
+              misses=$((misses + 1))
+              echo "::warning::the client missed status check $misses in a row"
+              if [ "$misses" -ge 5 ]; then
+                echo "::error::the client stopped answering status checks"
+                exit 1
+              fi
+              continue
+            fi
+            case "$state" in
+              *"bench-run: running"*) ;;
+              *) break ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::run.ts is still running after $minutes minutes"
+              exit 1
+            fi
+          done
+          echo "RUN_ENDED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          # the companion copies the log once more when run.ts stops
+          sleep 10
+          show
+          echo "$state"
+          case "$state" in
+            *"result=success status=0 "*) ;;
+            *)
+              echo "::error::run.ts did not succeed: $state"
+              exit 1
+              ;;
+          esac
+
+      - name: Collect the results
+        if: always() && (env.AGENT_SENT != '' || env.RUN_SENT != '')
+        run: |
+          set -euo pipefail
+          . scripts/rig-lib.sh
+          failed=0
+          if [ -n "${AGENT_SENT:-}" ]; then ssm_run agent-log 300 "$SERVER_ID" || failed=1; fi
+          if [ -n "${RUN_SENT:-}" ]; then ssm_run collect 900 "$CLIENT_ID" || failed=1; fi
+          exit "$failed"
+
+      - name: Fetch the results and write the metadata
+        if: always() && env.CLIENT_ID != ''
+        run: |
+          set -euo pipefail
+          out=$RUNNER_TEMP/out
+          mkdir -p "$out"
+          # everything the pass left in the bucket but the bundle and the binaries
+          aws s3 cp "s3://$BUCKET/runs/$RUN_ID/" "$out/" --recursive --exclude 'bin/*' --exclude bundle.tgz --only-show-errors \
+            || echo "::warning::not everything under s3://$BUCKET/runs/$RUN_ID/ came down"
+          ids=("$CLIENT_ID")
+          if [ -n "${SERVER_ID:-}" ]; then ids+=("$SERVER_ID"); fi
+          instances=$(aws ec2 describe-instances --instance-ids "${ids[@]}" --output json \
+            --query 'Reservations[].Instances[].{id: InstanceId, type: InstanceType, ami: ImageId, zone: Placement.AvailabilityZone}')
+          jq -n --argjson instances "$instances" \
+            --arg runId "$RUN_ID" --arg githubRunId "$GITHUB_RUN_ID" --arg lane "$LANE" --arg mode "$MODE" \
+            --arg candidates "$CANDIDATES" --argjson pass "$PASS" --argjson passes "$PASSES" \
+            --arg region "$AWS_REGION" --arg gitSha "$GITHUB_SHA" \
+            --arg serverId "${SERVER_ID:-}" --arg clientId "$CLIENT_ID" \
+            --arg launchedAt "${LAUNCHED_AT:-}" --arg startedAt "${RUN_STARTED_AT:-}" --arg endedAt "${RUN_ENDED_AT:-}" '
+            def instance($id): (($instances | map(select(.id == $id)) | first) // {});
+            def known($v): if $v == "" then null else $v end;
+            {
+              runId: $runId, githubRunId: $githubRunId, lane: $lane, mode: $mode, candidates: $candidates,
+              pass: $pass, passes: $passes, region: $region,
+              zone: instance($clientId).zone, ami: (instance($serverId).ami // instance($clientId).ami),
+              serverType: instance($serverId).type, clientType: instance($clientId).type,
+              serverInstance: known($serverId), clientInstance: $clientId, gitSha: $gitSha,
+              launchedAt: known($launchedAt), startedAt: known($startedAt), endedAt: known($endedAt)
+            }' > "$out/metadata.json"
+          cat "$out/metadata.json"
+          find "$out" -type f | sort
+
+      - uses: actions/upload-artifact@v7
+        if: always() && env.CLIENT_ID != ''
+        with:
+          name: http-servers-${{ env.RUN_ID }}
+          path: ${{ runner.temp }}/out/
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Terminate the pair
+        if: always()
+        run: |
+          set -euo pipefail
+          ids=()
+          for id in "${SERVER_ID:-}" "${CLIENT_ID:-}"; do
+            if [ -n "$id" ]; then ids+=("$id"); fi
+          done
+          # and anything else this pass launched, should a step have failed before it recorded an id
+          while read -r id; do
+            if [ -n "$id" ] && [[ " ${ids[*]} " != *" $id "* ]]; then ids+=("$id"); fi
+          done < <(aws ec2 describe-instances --output text --query 'Reservations[].Instances[].InstanceId' \
+            --filters "Name=tag:Name,Values=$RUN_ID-client,$RUN_ID-server" "Name=tag:Project,Values=$PROJECT_TAG" \
+            Name=instance-state-name,Values=pending,running,stopping,stopped | tr '\t' '\n')
+          if [ ${#ids[@]} -eq 0 ]; then
+            echo "nothing to terminate"
+            exit 0
+          fi
+          aws ec2 terminate-instances --instance-ids "${ids[@]}" --query 'TerminatingInstances[].[InstanceId,CurrentState.Name]' --output text
+
+  reaper:
+    name: Reap stale rig instances
+    needs: pass
+    if: always()
+    runs-on: ubuntu-24.04
+    environment: http-servers-bench
+    timeout-minutes: 10
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+          role-session-name: http-servers-reaper-${{ github.run_id }}
+
+      - name: Terminate rig instances launched more than six hours ago
+        run: |
+          set -euo pipefail
+          # every instance powers itself off within 330 minutes (its user data), so an older one is stuck
+          cutoff=$(date -u -d '6 hours ago' +%Y-%m-%dT%H:%M:%S+00:00)
+          stale=()
+          while read -r id launched; do
+            if [ -n "$id" ] && [[ $launched < $cutoff ]]; then stale+=("$id"); fi
+          done < <(aws ec2 describe-instances --output text --query 'Reservations[].Instances[].[InstanceId,LaunchTime]' \
+            --filters "Name=tag:Project,Values=$PROJECT_TAG" Name=instance-state-name,Values=pending,running,stopping,stopped)
+          if [ ${#stale[@]} -eq 0 ]; then
+            echo "no stale instances"
+            exit 0
+          fi
+          echo "terminating ${stale[*]}"
+          aws ec2 terminate-instances --instance-ids "${stale[@]}" --query 'TerminatingInstances[].[InstanceId,CurrentState.Name]' --output text

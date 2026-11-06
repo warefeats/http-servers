@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.DS_Store
+.env
+.env.*
+!.env.example
+coverage/
+*.tsbuildinfo
+cdk.out/
+infra-outputs.json
+build/
+build-*/
+results/
+runs/raw/
+
+# Local Claude Code config
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+AGENTS.md

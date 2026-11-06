@@ -99,6 +99,12 @@ export interface StepRecord extends StepOutcome {
   window: WindowRecord;
 }
 
+/** The commonest transport error of a window, for the progress line. */
+export function topError(errors: Record<string, number>): string {
+  const top = Object.entries(errors).sort((a, b) => b[1] - a[1])[0];
+  return top ? `; ${top[1].toLocaleString("en-US")} × ${top[0].slice(0, 120)}` : "";
+}
+
 export function errorRate(p: OhaPass): number {
   const attempted = p.completed + p.transportErrors;
   return attempted === 0 ? 1 : (p.transportErrors + (p.completed - p.success)) / attempted;
@@ -168,7 +174,7 @@ export async function capacityCell(env: Env, id: string, cell: CapacityCell, p: 
       const w = await window(env, cell.route, connections, p.stepS, p.clientBoundAt, rps);
       const ok = held(rps, w.achievedRps, w.oha.p99Ms, w.errorRate, HOLD);
       if (!ok && generatorShortfall(rps, w)) w.clientBound = true;
-      console.log(`    ${id} ${cell.id} ${rps.toLocaleString("en-US")}/s: ${ok ? "held" : "failed"} at ${Math.round(w.achievedRps).toLocaleString("en-US")}/s, p99 ${w.oha.p99Ms ?? "–"} ms, errors ${(w.errorRate * 100).toFixed(2)}%, ${w.usPerResponse?.toFixed(1) ?? "–"} µs/response, client ${(w.clientShare * 100).toFixed(0)}%${w.otherCpus !== null && w.otherCpus > 0.5 ? `, other work ${w.otherCpus.toFixed(1)} CPUs` : ""}`);
+      console.log(`    ${id} ${cell.id} ${rps.toLocaleString("en-US")}/s: ${ok ? "held" : "failed"} at ${Math.round(w.achievedRps).toLocaleString("en-US")}/s, p99 ${w.oha.p99Ms ?? "–"} ms, errors ${(w.errorRate * 100).toFixed(2)}%, ${w.usPerResponse?.toFixed(1) ?? "–"} µs/response, client ${(w.clientShare * 100).toFixed(0)}%${w.otherCpus !== null && w.otherCpus > 0.5 ? `, other work ${w.otherCpus.toFixed(1)} CPUs` : ""}${topError(w.oha.errors)}`);
       return { offeredRps: rps, achievedRps: w.achievedRps, p99Ms: w.oha.p99Ms, errorRate: w.errorRate, held: ok, window: w };
     }, cell.search);
     const floor = result.steps.some((s) => !s.held && s.window.clientBound);

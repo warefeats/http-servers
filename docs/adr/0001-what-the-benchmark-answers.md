@@ -54,7 +54,7 @@ A smoke runs every cell with 100 slow clients and shortened steps.
 ### Hardware
 
 - **Server:** c8g.xlarge (Graviton4, 4 vCPUs, 8 GiB), a size a service runs on. The x86 c8i.xlarge may follow by amendment.
-- **Client:** c8gn.4xlarge (16 vCPUs, network-optimized) running oha 1.16.0, in the same availability zone and cluster placement group.
+- **Client:** c8gn.4xlarge (16 vCPUs, network-optimized) running oha 1.16.0, in the same availability zone and cluster placement group. Every step opens fresh connections to one server port, so the client widens its local port range to 1024–65535 and reuses TIME_WAIT ports for outgoing connections (`tcp_tw_reuse=1`); the first smoke ran out of ports without it, and every request of the steps that followed failed at the client.
 - **Slow clients:** on the server, `tc qdisc replace dev <nic> root fq maxrate 10mbit` paces every flow; on the client, `netem delay 40ms` adds the round trip. Both are removed after the cell.
 - **The network ceiling:** at about 1.875 Gbps sustained, `323k` cannot exceed about 725 responses/s once burst credits are spent. As in map-tile-servers ADR 0011, a capacity above what the sustained rate carries is capped at it and the page names the servers that hit the ceiling; the server's ENA allowance counters (`bw_out_allowance_exceeded` and the rest) are read before and after every window to confirm it. CPU per response and memory at the ceiling still separate the servers.
 

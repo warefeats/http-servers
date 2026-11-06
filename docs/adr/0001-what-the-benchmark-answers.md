@@ -94,6 +94,6 @@ A smoke may spend up to $2 and 30 minutes. A framework run (one dispatch: three 
 ## Consequences
 
 - The rig is a new CDK stack, `WarefeatsHttpServersBench` (results bucket, security group, cluster placement group, server and client launch templates, instance role), driven from GitHub Actions through an OIDC role, `http-servers-github-deploy`, the way the kv-stores and map-tile-servers rigs are. Deploying both is a one-time infrastructure step, `just rig-deploy` and then `just setup-oidc`. After that, a run needs only `gh`.
-- Until the repo is public, GitHub's free arm64 runners are not available to it, so builds run on the rig's client.
+- Builds run on the rig's client, the same Graviton4 generation as the server, rather than on GitHub's arm64 runners.
 - The results describe four Graviton4 cores behind a 50 Gbps network. Other sizes and architectures are other questions, and the page says so.
 - Adding a candidate means a server crate, a row in the candidate table and an amendment here naming its documented setup.

@@ -8,6 +8,7 @@ coverage/
 *.tsbuildinfo
 cdk.out/
 infra-outputs.json
+cdk.context.json
 build/
 build-*/
 results/

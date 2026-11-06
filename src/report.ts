@@ -6,7 +6,8 @@
  */
 import { readFileSync } from "node:fs";
 import { highestCommonHeld } from "./capacity";
-import type { StepRecord } from "./measure";
+import { gbitPerS, type StepRecord, type WindowRecord } from "./measure";
+import type { BulkCell, SlowCell } from "./protocol";
 import type { CellRecord, RunFile } from "./run";
 import { bootstrapMedian, type Interval, median, tInterval, verdict } from "./stats";
 
@@ -43,6 +44,22 @@ function pairedRatios(runs: readonly RunFile[], cell: string, headArm: string, b
 }
 
 const capacityOf = (r: CellRecord) => r.capacity?.capacityRps ?? null;
+
+/** The closed-loop windows of one cell and arm, each with its cell's peak memory growth. */
+function closedWindows(runs: readonly RunFile[], cell: string, arm: string, pick: (r: CellRecord) => WindowRecord | undefined): { w: WindowRecord; g: number | null }[] {
+  return samples(runs, cell, arm).flatMap((s) => {
+    const w = pick(s.rec);
+    return w ? [{ w, g: s.rec.peakGrowthMb }] : [];
+  });
+}
+
+/** The median of a measure over windows, skipping the ones that lack it. */
+function medianOf<T>(xs: readonly T[], f: (x: T) => number | null): number {
+  return median(xs.flatMap((x) => {
+    const v = f(x);
+    return v === null ? [] : [v];
+  }));
+}
 
 /** CPU per response and p99 at the highest rate both searches held. */
 function atCommon(pick: (s: StepRecord) => number | null) {
@@ -87,24 +104,41 @@ export function renderReport(runs: readonly RunFile[]): string {
     lines.push("");
   }
 
-  const slow = first.protocol.cells.find((c) => c.kind === "slow");
-  if (slow && slow.kind === "slow") {
+  const slowCells = first.protocol.cells.filter((c): c is SlowCell => c.kind === "slow");
+  const bulkCells = first.protocol.cells.filter((c): c is BulkCell => c.kind === "bulk");
+  // every slow cell shares its clients and shaping (src/protocol.ts), so one caption describes them all
+  const slow = slowCells[0];
+  if (slow) {
     const how = first.local ? `the listener's send buffer capped at ${(slow.localSndbuf * 2) / 1024} KiB` : `each flow paced at ${slow.flowRateMbit} Mbit/s with ${slow.rttMs} ms added round trip`;
-    lines.push(`Slow clients: ${fmt(slow.connections)} keep-alive clients fetching \`/323k\` back to back, ${how}:`, "");
-    lines.push("| Server | Responses/s | p50 (ms) | p99 (ms) | CPU (µs/response) | Peak memory growth (MB) |", "| :-- | --: | --: | --: | --: | --: |");
+    lines.push(`Slow clients: ${fmt(slow.connections)} keep-alive clients fetching each route back to back, ${how}:`, "");
+    lines.push("| Route | Server | Responses/s | p50 (ms) | p99 (ms) | CPU (µs/response) | Peak memory growth (MB) |", "| :-- | :-- | --: | --: | --: | --: | --: |");
+    for (const cell of slowCells) {
+      let firstRow = true;
+      for (const arm of armIds) {
+        const ws = closedWindows(runs, cell.id, arm, (r) => r.slow);
+        if (ws.length === 0) continue;
+        lines.push(`| ${firstRow ? `\`${cell.route}\`` : ""} | ${label(arm)} | ${fmt(medianOf(ws, (x) => x.w.achievedRps))} | ${fmt(medianOf(ws, (x) => x.w.oha.p50Ms), 1)} | ${fmt(medianOf(ws, (x) => x.w.oha.p99Ms), 1)} | ${fmt(medianOf(ws, (x) => x.w.usPerResponse), 1)} | ${fmt(medianOf(ws, (x) => x.g), 1)} |`);
+        firstRow = false;
+      }
+    }
+    lines.push("");
+  }
+
+  for (const cell of bulkCells) {
+    lines.push(`Large file: ${fmt(cell.connections)} keep-alive clients downloading \`${cell.route}\` (${fmt(cell.bytes / 1_048_576)} MiB, through each framework's own file server) back to back, nothing shaped:`, "");
+    lines.push("| Server | Throughput (Gbit/s) | Responses/s | p50 (ms) | p99 (ms) | CPU (ms/response) | Peak memory growth (MB) |", "| :-- | --: | --: | --: | --: | --: | --: |");
     for (const arm of armIds) {
-      const ws = samples(runs, slow.id, arm).flatMap((s) => (s.rec.slow ? [{ w: s.rec.slow, g: s.rec.peakGrowthMb }] : []));
+      const ws = closedWindows(runs, cell.id, arm, (r) => r.bulk);
       if (ws.length === 0) continue;
-      const m = (f: (x: (typeof ws)[number]) => number | null) => median(ws.flatMap((x) => { const v = f(x); return v === null ? [] : [v]; }));
-      lines.push(`| ${label(arm)} | ${fmt(m((x) => x.w.achievedRps))} | ${fmt(m((x) => x.w.oha.p50Ms), 1)} | ${fmt(m((x) => x.w.oha.p99Ms), 1)} | ${fmt(m((x) => x.w.usPerResponse), 1)} | ${fmt(m((x) => x.g), 1)} |`);
+      lines.push(`| ${label(arm)} | ${fmt(medianOf(ws, (x) => gbitPerS(x.w, cell.bytes)), 2)} | ${fmt(medianOf(ws, (x) => x.w.achievedRps), 1)} | ${fmt(medianOf(ws, (x) => x.w.oha.p50Ms), 1)} | ${fmt(medianOf(ws, (x) => x.w.oha.p99Ms), 1)} | ${fmt(medianOf(ws, (x) => (x.w.usPerResponse === null ? null : x.w.usPerResponse / 1000)), 2)} | ${fmt(medianOf(ws, (x) => x.g), 1)} |`);
     }
     lines.push("");
   }
 
   if (first.lane === "change" && first.pair) {
     const { base, head } = first.pair;
-    lines.push(`${label(head)} against ${label(base)}: ratio of head to base, median over paired passes with its 95% bootstrap interval. Higher is better for capacity, lower for the rest:`, "");
-    lines.push("| Route | Capacity | CPU per response | p99 | Peak memory growth | Reading |", "| :-- | --: | --: | --: | --: | :-- |");
+    lines.push(`${label(head)} against ${label(base)}: ratio of head to base, median over paired passes with its 95% bootstrap interval. Higher is better for capacity and throughput, lower for the rest:`, "");
+    lines.push("| Route | Capacity or throughput | CPU per response | p99 | Peak memory growth | Reading |", "| :-- | --: | --: | --: | --: | :-- |");
     const growth = (h: CellRecord, b: CellRecord): [number | null, number | null] => [h.peakGrowthMb, b.peakGrowthMb];
     for (const cell of capCells) {
       const cap = bootstrapMedian(pairedRatios(runs, cell, head, base, (h, b) => [capacityOf(h), capacityOf(b)]));
@@ -114,11 +148,18 @@ export function renderReport(runs: readonly RunFile[]): string {
       const readings = [`capacity ${verdict(cap, true)}`, `CPU ${verdict(cpu, false)}`, `p99 ${verdict(p99, false)}`, `memory ${verdict(mem, false)}`];
       lines.push(`| \`/${cell}\` | ${ratio(cap)} | ${ratio(cpu)} | ${ratio(p99)} | ${ratio(mem)} | ${readings.join("; ")} |`);
     }
-    if (slow) {
-      const cpu = bootstrapMedian(pairedRatios(runs, slow.id, head, base, (h, b) => [h.slow?.usPerResponse ?? null, b.slow?.usPerResponse ?? null]));
-      const p99 = bootstrapMedian(pairedRatios(runs, slow.id, head, base, (h, b) => [h.slow?.oha.p99Ms ?? null, b.slow?.oha.p99Ms ?? null]));
-      const mem = bootstrapMedian(pairedRatios(runs, slow.id, head, base, growth));
-      lines.push(`| slow \`/323k\` | – | ${ratio(cpu)} | ${ratio(p99)} | ${ratio(mem)} | CPU ${verdict(cpu, false)}; p99 ${verdict(p99, false)}; memory ${verdict(mem, false)} |`);
+    for (const cell of slowCells) {
+      const cpu = bootstrapMedian(pairedRatios(runs, cell.id, head, base, (h, b) => [h.slow?.usPerResponse ?? null, b.slow?.usPerResponse ?? null]));
+      const p99 = bootstrapMedian(pairedRatios(runs, cell.id, head, base, (h, b) => [h.slow?.oha.p99Ms ?? null, b.slow?.oha.p99Ms ?? null]));
+      const mem = bootstrapMedian(pairedRatios(runs, cell.id, head, base, growth));
+      lines.push(`| slow \`${cell.route}\` | – | ${ratio(cpu)} | ${ratio(p99)} | ${ratio(mem)} | CPU ${verdict(cpu, false)}; p99 ${verdict(p99, false)}; memory ${verdict(mem, false)} |`);
+    }
+    for (const cell of bulkCells) {
+      const thr = bootstrapMedian(pairedRatios(runs, cell.id, head, base, (h, b) => [h.bulk?.achievedRps ?? null, b.bulk?.achievedRps ?? null]));
+      const cpu = bootstrapMedian(pairedRatios(runs, cell.id, head, base, (h, b) => [h.bulk?.usPerResponse ?? null, b.bulk?.usPerResponse ?? null]));
+      const p99 = bootstrapMedian(pairedRatios(runs, cell.id, head, base, (h, b) => [h.bulk?.oha.p99Ms ?? null, b.bulk?.oha.p99Ms ?? null]));
+      const mem = bootstrapMedian(pairedRatios(runs, cell.id, head, base, growth));
+      lines.push(`| \`${cell.route}\` | ${ratio(thr)} | ${ratio(cpu)} | ${ratio(p99)} | ${ratio(mem)} | throughput ${verdict(thr, true)}; CPU ${verdict(cpu, false)}; p99 ${verdict(p99, false)}; memory ${verdict(mem, false)} |`);
     }
     const aa = bootstrapMedian(pairedRatios(runs, "json", `${base}#aa`, base, (h, b) => [capacityOf(h), capacityOf(b)]));
     const aaCpu = bootstrapMedian(pairedRatios(runs, "json", `${base}#aa`, base, atCommon((s) => s.window.usPerResponse)));
@@ -130,7 +171,7 @@ export function renderReport(runs: readonly RunFile[]): string {
   if (failed.length > 0) lines.push(`Failed cells: ${failed.map((c) => `pass ${c.pass} ${c.cell} ${c.arm}: ${c.error}`).join("; ")}`, "");
   const other = runs.flatMap((r) => r.cells.flatMap((c) => [...(c.capacity?.steps.map((s) => s.window.otherCpus) ?? []), c.slow?.otherCpus ?? null])).filter((x): x is number => x !== null);
   const host = first.host;
-  lines.push(`${passes} pass(es)${runs.length > 1 ? ` over ${runs.length} instance pairs` : ""}; within a cell the servers ran back to back in an order that rotated each pass, a fresh server process per cell; open-loop load from ${host["ohaProcesses"] ?? "one"} oha processes (${host["oha"] ?? "oha"}) with its latency correction, each percentile the highest any process saw, ${first.protocol.stepS} s recorded per step after ${first.protocol.warmupS} s of warm-up; CPU is the server process's user plus system time. ${first.local ? `Local: server on CPUs ${host["serverCpus"]}, oha on ${host["clientCpus"]}, over loopback, on ${host["hostname"]} (${host["kernel"]}); other work on the host peaked at ${fmt(Math.max(0, ...other), 1)} CPUs during a recorded window.` : `Rig: ${host["hostname"] ?? ""}.`}`);
+  lines.push(`${passes} pass(es)${runs.length > 1 ? ` over ${runs.length} instance pairs` : ""}; within a cell the servers ran back to back in an order that rotated each pass, a fresh server process per cell; open-loop load from ${host["ohaProcesses"] ?? "one"} oha processes (${host["oha"] ?? "oha"}) with its latency correction, each percentile the highest any process saw, ${first.protocol.stepS} s recorded per step after ${first.protocol.warmupS} s of warm-up, and ${first.protocol.slowWindowS} s after ${first.protocol.slowWarmupS} s in the closed-loop cells; CPU is the server process's user plus system time. ${first.local ? `Local: server on CPUs ${host["serverCpus"]}, oha on ${host["clientCpus"]}, over loopback, on ${host["hostname"]} (${host["kernel"]}); other work on the host peaked at ${fmt(Math.max(0, ...other), 1)} CPUs during a recorded window.` : `Rig: ${host["hostname"] ?? ""}.`}`);
   return `${lines.join("\n")}\n`;
 }
 

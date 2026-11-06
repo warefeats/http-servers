@@ -6,7 +6,7 @@ import { foreignPackages, lockPackages, pairDrift } from "../src/build";
 import { candidate, CANDIDATES, LANES, manifestParts, planCandidates, renderManifest } from "../src/candidates";
 import { findCapacity, held, highestCommonHeld, type StepOutcome } from "../src/capacity";
 import { arg } from "../src/cli";
-import { errorRate, generatorShortfall, netemCommand, parseStats } from "../src/measure";
+import { errorRate, gbitPerS, generatorShortfall, netemCommand, parseStats } from "../src/measure";
 import { mergePasses, ohaArgs, parseOha, shares } from "../src/oha";
 import { hostTicks, parseEthtool } from "../src/proc";
 import { connectionsFor, protocol } from "../src/protocol";
@@ -34,7 +34,8 @@ describe("candidates", () => {
   test("a git actix-web candidate takes every workspace crate from its commit", () => {
     const { framework, patch } = manifestParts(candidate("actix-web-pr4302"));
     expect(framework).toContain('rev = "2a3f2019d2be1ecbd005916135c0b69a74cf2038"');
-    for (const name of ["actix-http", "actix-router", "actix-web-codegen"]) expect(patch).toContain(`${name} = { git = "https://github.com/johncarmack1984/actix-web"`);
+    // actix-files depends on actix-web by version, so actix-web itself is patched too, or the build would hold two
+    for (const name of ["actix-web", "actix-http", "actix-router", "actix-web-codegen", "actix-files"]) expect(patch).toContain(`\n${name} = { git = "https://github.com/johncarmack1984/actix-web"`);
   });
 
   test("the templates render to manifests with no marker left, prose untouched", () => {
@@ -246,7 +247,20 @@ describe("run", () => {
     expect(protocol("change", "full", false).passes).toBe(6);
     expect(protocol("frameworks", "full", false).passes).toBe(1);
     expect(protocol("change", "smoke", true)).toMatchObject({ passes: 1, stepS: 2 });
-    expect(protocol("change", "full", false).cells.map((c) => c.id)).toEqual(["json", "16k", "323k", "slow-323k"]);
+    expect(protocol("change", "full", false).cells.map((c) => c.id)).toEqual(["json", "16k", "323k", "323k-fresh", "slow-323k", "slow-323k-fresh", "file"]);
+  });
+
+  test("the slow cells share their clients and shaping, which the report captions once", () => {
+    for (const mode of ["smoke", "full"] as const) {
+      const slow = protocol("change", mode, false).cells.flatMap((c) => (c.kind === "slow" ? [{ ...c, id: "", route: "" }] : []));
+      expect(slow.length).toBe(2);
+      expect(new Set(slow.map((c) => JSON.stringify(c))).size).toBe(1);
+    }
+  });
+
+  test("the file cell downloads 64 MiB, and its throughput counts completed responses", () => {
+    expect(protocol("change", "full", false).cells.find((c) => c.kind === "bulk")).toMatchObject({ route: "/file", bytes: 67_108_864, connections: 64 });
+    expect(gbitPerS({ achievedRps: 93.13225746154785 }, 67_108_864)).toBeCloseTo(50, 6);
   });
 
   test("cli arguments", () => {

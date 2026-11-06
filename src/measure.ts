@@ -7,7 +7,7 @@ import type { Stats } from "./agent";
 import { type Capacity, findCapacity, HOLD, held, type StepOutcome } from "./capacity";
 import { type OhaPass, runOha } from "./oha";
 import { HZ } from "./proc";
-import { type CapacityCell, connectionsFor, type Protocol, type SlowCell } from "./protocol";
+import { type BulkCell, type CapacityCell, connectionsFor, type Protocol, type SlowCell } from "./protocol";
 
 type Json = Record<string, unknown>;
 
@@ -161,6 +161,7 @@ export interface CellResult {
   peakGrowthMb: number | null;
   capacity?: Capacity<StepRecord> & { floor: boolean };
   slow?: WindowRecord;
+  bulk?: WindowRecord;
 }
 
 async function peak(env: Env, startRssKb: number | null): Promise<number | null> {
@@ -203,6 +204,20 @@ function netem(nic: string, rttMs: number | null): void {
   if (r.exitCode !== 0 && rttMs !== null) throw new Error(`${cmd.join(" ")}: ${r.stderr.toString().trim()}`);
 }
 
+/** A fresh server under `connections` keep-alive clients fetching `route` back to back: a warm-up, then one recorded window. */
+async function closedLoop(env: Env, id: string, route: string, connections: number, p: Protocol, beforeWindow: () => Promise<void>, serverEnv: Record<string, string>): Promise<Omit<CellResult, "capacity" | "slow" | "bulk"> & { window: WindowRecord }> {
+  const started = await env.agent.start(id, serverEnv);
+  try {
+    const startRssKb = (await env.agent.stats()).rssKb;
+    await runOha({ url: `${env.target}${route}`, connections, durationSeconds: p.slowWarmupS, timeoutSeconds: 60, cpus: env.clientCpus, processes: env.generators });
+    await beforeWindow();
+    const w = await window(env, route, connections, p.slowWindowS, p.clientBoundAt, undefined, 60);
+    return { banner: started.banner, startRssKb, peakGrowthMb: await peak(env, startRssKb), window: w };
+  } finally {
+    await env.agent.stop();
+  }
+}
+
 export async function slowCell(env: Env, id: string, cell: SlowCell, p: Protocol, beforeWindow: () => Promise<void>): Promise<CellResult> {
   const shaped = !env.local;
   if (shaped) {
@@ -211,22 +226,25 @@ export async function slowCell(env: Env, id: string, cell: SlowCell, p: Protocol
     netem(env.clientNic, cell.rttMs);
   }
   try {
-    const started = await env.agent.start(id, env.local ? { SNDBUF: String(cell.localSndbuf) } : {});
-    try {
-      const startRssKb = (await env.agent.stats()).rssKb;
-      await runOha({ url: `${env.target}${cell.route}`, connections: cell.connections, durationSeconds: p.slowWarmupS, timeoutSeconds: 60, cpus: env.clientCpus, processes: env.generators });
-      await beforeWindow();
-      const w = await window(env, cell.route, cell.connections, p.slowWindowS, p.clientBoundAt, undefined, 60);
-      const growth = await peak(env, startRssKb);
-      console.log(`    ${id} ${cell.id}: ${Math.round(w.achievedRps).toLocaleString("en-US")}/s, p50 ${w.oha.p50Ms} ms, p99 ${w.oha.p99Ms} ms, ${w.usPerResponse?.toFixed(1) ?? "–"} µs/response, peak growth ${growth?.toFixed(1) ?? "–"} MB, errors ${(w.errorRate * 100).toFixed(2)}%`);
-      return { banner: started.banner, startRssKb, peakGrowthMb: growth, slow: w };
-    } finally {
-      await env.agent.stop();
-    }
+    const { window: w, ...r } = await closedLoop(env, id, cell.route, cell.connections, p, beforeWindow, env.local ? { SNDBUF: String(cell.localSndbuf) } : {});
+    console.log(`    ${id} ${cell.id}: ${Math.round(w.achievedRps).toLocaleString("en-US")}/s, p50 ${w.oha.p50Ms} ms, p99 ${w.oha.p99Ms} ms, ${w.usPerResponse?.toFixed(1) ?? "–"} µs/response, peak growth ${r.peakGrowthMb?.toFixed(1) ?? "–"} MB, errors ${(w.errorRate * 100).toFixed(2)}%${topError(w.oha.errors)}`);
+    return { ...r, slow: w };
   } finally {
     if (shaped && env.clientNic) {
       await env.agent.shape(null);
       netem(env.clientNic, null);
     }
   }
+}
+
+/** A window's delivered throughput in Gbit/s, counting completed responses only. */
+export function gbitPerS(w: Pick<WindowRecord, "achievedRps">, bytes: number): number {
+  return (w.achievedRps * bytes * 8) / 1e9;
+}
+
+/** The bulk cell: the same closed loop with nothing shaped, on the rig and locally alike. */
+export async function bulkCell(env: Env, id: string, cell: BulkCell, p: Protocol, beforeWindow: () => Promise<void>): Promise<CellResult> {
+  const { window: w, ...r } = await closedLoop(env, id, cell.route, cell.connections, p, beforeWindow, {});
+  console.log(`    ${id} ${cell.id}: ${gbitPerS(w, cell.bytes).toFixed(2)} Gbit/s (${w.achievedRps.toFixed(1)}/s), p50 ${w.oha.p50Ms} ms, p99 ${w.oha.p99Ms} ms, ${w.usPerResponse?.toFixed(0) ?? "–"} µs/response, client ${(w.clientShare * 100).toFixed(0)}%, peak growth ${r.peakGrowthMb?.toFixed(1) ?? "–"} MB, errors ${(w.errorRate * 100).toFixed(2)}%${topError(w.oha.errors)}`);
+  return { ...r, bulk: w };
 }

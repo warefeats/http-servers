@@ -11,20 +11,24 @@ The candidates and lanes live in [`src/candidates.ts`](src/candidates.ts).
 
 ## Servers
 
-One bench server per framework in [`servers/`](servers/), written the way each framework's docs show, sharing [`servers/common`](servers/common/src/lib.rs): the listener, the byte bodies and the JSON document.
+One bench server per framework in [`servers/`](servers/), written the way each framework's docs show, sharing [`servers/common`](servers/common/src/lib.rs): the listener, the byte bodies, the file and the JSON document.
 
 | Route | Response |
 | :-- | :-- |
 | `/json` | a document of about 1 KB, built and serialized on every request with the framework's own JSON responder |
 | `/16k` | 16,384 bytes, under actix-web's 32 KiB write-buffer threshold |
-| `/323k` | 323,000 bytes, the size #4302 was measured on |
+| `/323k` | 323,000 bytes, the size #4302 was measured on, cloned from one shared buffer |
+| `/323k-fresh` | the same 323,000 bytes, copied into a new buffer on every request as a handler builds its own body |
+| `/file` | a 64 MiB file, through the file server each framework's docs use: actix-files' `NamedFile`, tower-http's `ServeFile` |
 
 Every server runs at its framework's defaults: default features, the default release profile, one worker per available CPU, no middleware, Nagle left on. The one equalization is the listen backlog: both listen through the same socket2 code with actix-web's default of 1,024, where axum's documented `tokio::net::TcpListener::bind` would get 128.
 
 ## Cells
 
 - `json`, `16k`, `323k`: capacity, the highest open-loop rate a server holds with p99 at most 50 ms, at most 0.1% errors and at least 95% delivered, found by doubling and then bisecting. CPU per response and p99 are read at the highest held rate.
-- `slow-323k`: 1,000 keep-alive clients (100 in a smoke) fetching `/323k` back to back, each flow paced at 10 Mbit/s with a 40 ms round trip on the rig; locally, the listener's send buffer is capped at 128 KiB instead. Peak memory, CPU per response and the response times those clients see.
+- `323k-fresh`: the same capacity search on `/323k-fresh`.
+- `slow-323k`, `slow-323k-fresh`: 1,000 keep-alive clients (100 in a smoke) fetching `/323k` or `/323k-fresh` back to back, each flow paced at 10 Mbit/s with a 40 ms round trip on the rig; locally, the listener's send buffer is capped at 128 KiB instead. Peak memory, CPU per response and the response times those clients see.
+- `file`: 64 keep-alive clients downloading `/file` back to back with nothing shaped. Throughput, CPU per response, peak memory and download times; no latency target, since one 64 MiB response alone takes about 11 ms on a 50 Gbps link.
 - The change lane measures its base against itself on `json` every pass (the A/A row), to show the noise floor.
 
 ## Running it locally

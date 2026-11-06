@@ -30,11 +30,13 @@ Facts the design rests on, checked on 2026-11-05:
 ### The servers
 
 - One bench server per framework in `servers/<framework>/`, each written the way its docs show: actix-web's `HttpServer` with an `App` of routes; axum's `Router` served by `axum::serve` under `#[tokio::main]`.
-- Three routes, the same response in every server:
+- Five routes, the same response in every server:
   - `/json`: a document of about 1 KB built and serialized on every request with the framework's own JSON responder, the small API response;
   - `/16k`: 16,384 bytes, a medium response that stays under actix-web's 32 KiB write-buffer threshold;
-  - `/323k`: 323,000 bytes, the average of the 50 largest Berlin tiles #4302 was measured on and the bot's body size.
-- The byte routes return the same bytes in every server, cloned from one shared buffer, with a `Content-Length` and `Content-Type: application/octet-stream`. The preflight checks every route's status, framing and hash in every candidate before a pass starts.
+  - `/323k`: 323,000 bytes, the average of the 50 largest Berlin tiles #4302 was measured on and the bot's body size;
+  - `/323k-fresh`: the same 323,000 bytes copied into a new buffer on every request, as a handler builds a body of its own (added 2026-11-06, see Cells);
+  - `/file`: a 64 MiB file that each server writes to its temp directory at startup, served by the file server its framework's docs use: actix-files' `NamedFile` for actix-web, tower-http's `ServeFile` for axum (added 2026-11-06, see Cells).
+- The byte routes return the same bytes in every server, `/16k` and `/323k` cloned from one shared buffer, all with a `Content-Length` and `Content-Type: application/octet-stream`. The preflight checks every route's status, framing and hash in every candidate before a pass starts.
 - Each framework at its defaults: default features, the default release profile, workers sized by the framework, no middleware, Nagle left on.
 - One equalization: both servers listen through the same socket2 code with a backlog of 1,024, actix-web's own default. axum's documented bind would get 128, and the slow-client cell opens 1,000 connections at once; every cell's warm-up establishes its connections before the measured window, so the backlog would only have shaped connection setup. Local runs also set the listener's send buffer through this code (see Local runs).
 - Plain HTTP/1.1 with keep-alive. TLS and HTTP/2 end at a proxy or CDN, at the same cost for every server, and the page says so.
@@ -48,6 +50,10 @@ Facts the design rests on, checked on 2026-11-05:
 
 1. **`json`, `16k`, `323k`:** capacity at the latency target, for each route.
 2. **`slow-323k`:** 1,000 keep-alive clients, each limited to 10 Mbit/s with a 40 ms round trip, each asking for the next 323,000-byte body as soon as the last one arrives. This is the regime #4302 changes: the server always has more to send than the network takes, so responses wait in the server's buffers. It reports peak memory, CPU per response and the response times those clients see.
+3. **`323k-fresh`, `slow-323k-fresh`:** the `323k` and `slow-323k` cells on `/323k-fresh`, whose 323,000 bytes are copied into a new buffer on every request.
+4. **`file`:** 64 keep-alive clients downloading `/file`, a 64 MiB file, back to back over the unshaped network. It reports throughput, CPU per response, peak memory and the download times. The cell has no latency target, since one 64 MiB response alone spends about 11 ms on a 50 Gbps link; like `slow-323k` it is closed loop, a 10 s warm-up and a 30 s window. 64 MiB is 16 times the 4 MiB a socket's send buffer grows to, so every download is many partial writes over about 1,000 chunks, and the file fits in the page cache, so the cell measures the servers rather than the disk. A file larger than the server's memory would measure the disk.
+
+Amended 2026-11-06, after the first full change run (Actions run 42155947807) and before any pass of cells 3 and 4: `/16k` and `/323k` clone one shared buffer, as a server answers from a cache or an embedded asset, and in that form `slow-323k` measures actix-web main copying a shared body into every connection's write buffer, the copy #4302 removes. Two forms of a large response that run left out are commoner. A handler builds its body on every request, so each connection holds its own copy however it is written. A large file goes through a file server: actix-files reads it in 64 KiB chunks of a fixed-length body, each one past the 32 KiB that sends a chunk down #4302's path, and tower-http's `ServeFile` also reads 64 KiB at a time.
 
 A smoke runs every cell with 100 slow clients and shortened steps.
 
@@ -70,8 +76,8 @@ A smoke runs every cell with 100 slow clients and shortened steps.
 ### Result
 
 - **Framework lane, the headline:** capacity per instance for each cell, and its price in dollars per million responses at AWS list prices for the instance (the instance-hour over the responses it holds in an hour). Internet egress is the same bytes for every framework, so it is stated once, not added. Servers are ranked per cell by capacity; a difference counts only when the 95% confidence intervals of the three passes do not overlap, otherwise it is a tie.
-- **Reported, not ranked:** CPU per response, peak memory, p99 at the highest step every server held, and the slow-client cell's memory, CPU and response times.
-- **Change lane:** for each cell, the ratio of head to base for capacity, CPU per response and p99 at the highest step both held, and peak memory, each with a 95% bootstrap interval over the paired passes. An interval that contains 1.0 reads "no measurable change"; otherwise the result is the direction and the size. The A/A interval is printed beside them.
+- **Reported, not ranked:** CPU per response, peak memory, p99 at the highest step every server held, the slow-client cells' memory, CPU and response times, and the file cell's throughput, CPU, memory and download times.
+- **Change lane:** for each capacity cell, the ratio of head to base for capacity, CPU per response and p99 at the highest step both held, and peak memory; for each closed-loop cell, CPU per response, p99 and peak memory over its window, and the file cell's throughput; each with a 95% bootstrap interval over the paired passes. An interval that contains 1.0 reads "no measurable change"; otherwise the result is the direction and the size. The A/A interval is printed beside them.
 - The rule above is fixed before any measured pass, and smoke runs never decide a result.
 
 ### Local runs
@@ -83,11 +89,11 @@ A smoke runs every cell with 100 slow clients and shortened steps.
 
 ### Budget
 
-A smoke may spend up to $2 and 30 minutes. A framework run (one dispatch: three passes in turn, each on a fresh instance pair) may spend up to $15 and 3 hours, and a change run up to $10 and 3 hours. A pair (two c8gn.4xlarge) costs about $1.90 an hour.
+A smoke may spend up to $2 and 30 minutes. A framework run (one dispatch: three passes in turn, each on a fresh instance pair) may spend up to $15 and 3 hours, and a change run up to $10 and 3.5 hours. A pair (two c8gn.4xlarge) costs about $1.90 an hour. Amended 2026-11-06 with cells 3 and 4, which add about 10 minutes to a pass: a change run was capped at 3 hours, and six passes now take about 3.
 
 ## Consequences
 
 - The rig is a new CDK stack, `WarefeatsHttpServersBench` (results bucket, security group, cluster placement group, server and client launch templates, instance role), driven from GitHub Actions through an OIDC role, `http-servers-github-deploy`, the way the kv-stores and map-tile-servers rigs are. Deploying both is a one-time infrastructure step, `just rig-deploy` and then `just setup-oidc`. After that, a run needs only `gh`.
 - Until the repo is public, GitHub's free arm64 runners are not available to it, so builds run on the rig's client.
-- The results describe Graviton4 at 4 vCPUs behind a network that sustains 1.875 Gbps. Other sizes and architectures are other questions, and the page says so.
+- The results describe four Graviton4 cores behind a 50 Gbps network. Other sizes and architectures are other questions, and the page says so.
 - Adding a candidate means a server crate, a row in the candidate table and an amendment here naming its documented setup.

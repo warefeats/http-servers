@@ -4,8 +4,13 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import type { Construct } from "constructs";
 
-/** The rig's two instances (docs/adr/0001, Hardware): a server the size a service runs on, and a network-optimized client. */
-export const SERVER_TYPE = "c8g.xlarge";
+/**
+ * The rig's two instances (docs/adr/0001, Hardware). The server runs on 4 cores of a network-optimized instance
+ * (SERVER_CPUS), whose flat 50 Gbps never drains mid-run the way a c8g.xlarge's burst credits do.
+ */
+export const SERVER_TYPE = "c8gn.4xlarge";
+/** The cores the agent pins every server process to (scripts/ssm/agent.sh). */
+export const SERVER_CPUS = "0-3";
 export const CLIENT_TYPE = "c8gn.4xlarge";
 
 /** User data's last line writes this file, and the rig's readiness gate (scripts/ssm/readiness.sh) waits for it. */

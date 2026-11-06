@@ -1,6 +1,6 @@
 name: Cloud rig
 
-# A run on the cloud rig of docs/adr/0001: a c8gn.4xlarge client and a c8g.xlarge server from the
+# A run on the cloud rig of docs/adr/0001: a c8gn.4xlarge client and a c8gn.4xlarge server (pinned to 4 cores) from the
 # WarefeatsHttpServersBench stack's launch templates, in its cluster placement group, driven over SSM through the
 # http-servers-github-deploy role, the way kv-stores and map-tile-servers run theirs. The client builds the
 # candidates (src/build.ts), the server runs each under src/agent.ts, and the client measures them (src/run.ts).

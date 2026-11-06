@@ -14,7 +14,7 @@ find /opt/bench/build/bin -type f -exec chmod +x {} +
 systemd-run --unit=bench-agent --service-type=exec --working-directory=/opt/bench \
   --setenv=HOME=/root --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   --property=LimitNOFILE=1048576 \
-  /usr/local/bin/bun run src/agent.ts --bin-dir=/opt/bench/build/bin --port=9000 --nic=auto
+  /usr/local/bin/bun run src/agent.ts --bin-dir=/opt/bench/build/bin --port=9000 --nic=auto --cpus=0-3
 i=0
 until curl -sf http://127.0.0.1:9000/health >/dev/null; do
   i=$((i + 1))

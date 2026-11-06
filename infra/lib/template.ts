@@ -59,3 +59,11 @@ export function launchTemplates(template: unknown): LaunchTemplateFacts[] {
   }
   return out;
 }
+
+/** A launch template by its role, from the logical id the stack gives it (both roles may share an instance type). */
+export function roleTemplate(lts: readonly LaunchTemplateFacts[], role: "server" | "client"): LaunchTemplateFacts {
+  const prefix = role === "server" ? "ServerLt" : "ClientLt";
+  const found = lts.find((t) => t.logicalId.startsWith(prefix));
+  if (!found) throw new Error(`no launch template for the ${role}`);
+  return found;
+}

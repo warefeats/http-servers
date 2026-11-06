@@ -5,8 +5,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { CLIENT_TYPE, SERVER_TYPE } from "../lib/http-servers-bench-stack.js";
-import { launchTemplates, synthesize } from "../lib/template.js";
+import { launchTemplates, roleTemplate, synthesize } from "../lib/template.js";
 
 const dir = process.argv[2];
 if (!dir) {
@@ -15,12 +14,8 @@ if (!dir) {
 }
 mkdirSync(dir, { recursive: true });
 const lts = launchTemplates(synthesize().toJSON());
-for (const [role, instanceType] of [
-  ["server", SERVER_TYPE],
-  ["client", CLIENT_TYPE],
-]) {
-  const lt = lts.find((t) => t.instanceType === instanceType);
-  if (!lt) throw new Error(`no launch template for the ${role} (${instanceType})`);
+for (const role of ["server", "client"] as const) {
+  const lt = roleTemplate(lts, role);
   writeFileSync(join(dir, `${role}.sh`), lt.userData.endsWith("\n") ? lt.userData : `${lt.userData}\n`);
-  console.log(`${role}: ${lt.logicalId}, ${instanceType}`);
+  console.log(`${role}: ${lt.logicalId}, ${lt.instanceType}`);
 }

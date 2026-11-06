@@ -8,7 +8,7 @@ export AWS_DEFAULT_REGION := aws_region
 export CDK_DEFAULT_ACCOUNT := aws_account
 export CDK_DEFAULT_REGION := aws_region
 
-# The cloud rig (docs/adr/0001): a c8g.xlarge server and a c8gn.4xlarge client per pass, dispatched from GitHub
+# The cloud rig (docs/adr/0001): a c8gn.4xlarge server pinned to 4 cores and a c8gn.4xlarge client per pass, dispatched from GitHub
 # Actions (.github/workflows/rig.yml) the way kv-stores and map-tile-servers run theirs. Set up once, with AWS
 # credentials: rig-deploy, then setup-oidc. After that a run needs only gh.
 

@@ -162,7 +162,7 @@ async function main(): Promise<void> {
       pair,
       candidates: candidates.map((c) => ({ id: c.id, label: c.label })),
       protocol: p,
-      host: { hostname: (await Bun.$`hostname`.text()).trim(), kernel: (await Bun.$`uname -r`.text()).trim(), cpus: String(navigator.hardwareConcurrency), oha: (await Bun.$`oha --version`.text()).trim(), ohaProcesses: String(generators), clientCpus: clientCpus ?? "all", serverCpus: local ? (arg("server-cpus") ?? "0-7") : "all" },
+      host: { hostname: (await Bun.$`hostname`.text()).trim(), kernel: (await Bun.$`uname -r`.text()).trim(), cpus: String(navigator.hardwareConcurrency), oha: (await Bun.$`oha --version`.text()).trim(), ohaProcesses: String(generators), clientPorts: (await Bun.file("/proc/sys/net/ipv4/ip_local_port_range").text()).trim().replace(/\s+/g, "-"), clientTwReuse: (await Bun.file("/proc/sys/net/ipv4/tcp_tw_reuse").text()).trim(), clientCpus: clientCpus ?? "all", serverCpus: (await env.agent.serverCpus()) ?? "all" },
       preflight: {},
       startedAt: new Date().toISOString(),
       cells: [],

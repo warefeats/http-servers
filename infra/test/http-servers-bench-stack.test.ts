@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Match } from "aws-cdk-lib/assertions";
 import {
   BUN_VERSION,
@@ -6,20 +8,17 @@ import {
   OHA_SHA256,
   OHA_VERSION,
   READY_MARKER,
+  SERVER_CPUS,
   SERVER_TYPE,
   SHUTDOWN_MINUTES,
 } from "../lib/http-servers-bench-stack.js";
-import { isRecord, launchTemplates, synthesize } from "../lib/template.js";
+import { isRecord, launchTemplates, roleTemplate, synthesize } from "../lib/template.js";
 
 describe("HttpServersBenchStack", () => {
   const template = synthesize();
   const lts = launchTemplates(template.toJSON());
-  const lt = (instanceType: string) => {
-    const found = lts.find((t) => t.instanceType === instanceType);
-    if (!found) throw new Error(`no launch template for ${instanceType}`);
-    return found;
-  };
-  const lines = (instanceType: string) => lt(instanceType).userData.trimEnd().split("\n");
+  const lt = (role: "server" | "client") => roleTemplate(lts, role);
+  const lines = (role: "server" | "client") => lt(role).userData.trimEnd().split("\n");
 
   test("the results bucket has its fixed name, expires runs and stale uploads, and goes with the stack", () => {
     template.resourceCountIs("AWS::S3::Bucket", 1);
@@ -82,7 +81,9 @@ describe("HttpServersBenchStack", () => {
   });
 
   test("two launch templates: the server and the client", () => {
-    expect(lts.map((t) => t.instanceType).sort()).toEqual([SERVER_TYPE, CLIENT_TYPE].sort());
+    expect(lts).toHaveLength(2);
+    expect(lt("server").instanceType).toBe(SERVER_TYPE);
+    expect(lt("client").instanceType).toBe(CLIENT_TYPE);
   });
 
   const roots: [string, number][] = [
@@ -104,8 +105,8 @@ describe("HttpServersBenchStack", () => {
     });
   });
 
-  test.each([SERVER_TYPE, CLIENT_TYPE])("%s user data: safety shutdown first, ready marker last, no clone", (instanceType) => {
-    const l = lines(instanceType);
+  test.each(["server", "client"] as const)("%s user data: safety shutdown first, ready marker last, no clone", (role) => {
+    const l = lines(role);
     expect(l[0]).toBe("#!/bin/bash");
     expect(l[1]).toBe("set -euxo pipefail");
     expect(l[2]).toBe(`shutdown -h +${SHUTDOWN_MINUTES}`);
@@ -120,8 +121,8 @@ describe("HttpServersBenchStack", () => {
   });
 
   test("only the client gets Rust and oha, and the server paces with fq", () => {
-    const server = lt(SERVER_TYPE).userData;
-    const client = lt(CLIENT_TYPE).userData;
+    const server = lt("server").userData;
+    const client = lt("client").userData;
     expect(server).not.toContain("rustup");
     expect(server).not.toContain("oha");
     expect(server).toContain("modprobe sch_fq");
@@ -137,5 +138,10 @@ describe("HttpServersBenchStack", () => {
     for (const name of ["ServerLtId", "ClientLtId", "PlacementGroup", "SecurityGroupId", "InstanceRoleArn", "ResultsBucketName"]) {
       template.hasOutput(name, {});
     }
+  });
+
+  test("the agent pins every server process to the cores the stack names", () => {
+    const agent = readFileSync(join(import.meta.dir, "..", "..", "scripts", "ssm", "agent.sh"), "utf8");
+    expect(agent).toContain(`--cpus=${SERVER_CPUS}`);
   });
 });

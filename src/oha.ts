@@ -9,6 +9,8 @@ export interface OhaPass {
   transportErrors: number;
   abortedAtDeadline: number;
   statusCodes: Record<string, number>;
+  /** Transport errors by oha's description, deadline aborts left out. */
+  errors: Record<string, number>;
   p50Ms: number | null;
   p90Ms: number | null;
   p99Ms: number | null;
@@ -51,6 +53,7 @@ export function parseOha(text: string): OhaPass {
     transportErrors,
     abortedAtDeadline,
     statusCodes,
+    errors: Object.fromEntries(Object.entries(errors).filter(([kind]) => kind !== OHA_DEADLINE_ABORT)),
     p50Ms: pct("p50"),
     p90Ms: pct("p90"),
     p99Ms: pct("p99"),
@@ -107,12 +110,15 @@ export function mergePasses(passes: readonly OhaPass[]): OhaPass {
   };
   const statusCodes: Record<string, number> = {};
   for (const p of passes) for (const [code, n] of Object.entries(p.statusCodes)) statusCodes[code] = (statusCodes[code] ?? 0) + n;
+  const errors: Record<string, number> = {};
+  for (const p of passes) for (const [kind, n] of Object.entries(p.errors)) errors[kind] = (errors[kind] ?? 0) + n;
   return {
     completed: sum((p) => p.completed),
     success: sum((p) => p.success),
     transportErrors: sum((p) => p.transportErrors),
     abortedAtDeadline: sum((p) => p.abortedAtDeadline),
     statusCodes,
+    errors,
     p50Ms: worst((p) => p.p50Ms),
     p90Ms: worst((p) => p.p90Ms),
     p99Ms: worst((p) => p.p99Ms),

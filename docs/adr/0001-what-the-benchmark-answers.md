@@ -53,10 +53,10 @@ A smoke runs every cell with 100 slow clients and shortened steps.
 
 ### Hardware
 
-- **Server:** c8g.xlarge (Graviton4, 4 vCPUs, 8 GiB), a size a service runs on. The x86 c8i.xlarge may follow by amendment.
-- **Client:** c8gn.4xlarge (16 vCPUs, network-optimized) running oha 1.16.0, in the same availability zone and cluster placement group.
+- **Server:** four Graviton4 cores, a size a service runs on: the agent pins the server process to cores 0–3 of a c8gn.4xlarge (16 vCPUs, 32 GiB), so the framework sizes itself to 4 workers. Amended 2026-11-06, after the second smoke: the first choice, a c8g.xlarge, sustains 1.875 Gbps and bursts to 12.5 Gbps on credits that last 5–60 minutes, and the smoke's `/json` alone pushed about 3 Gbps at 384,000 responses/s, so a three-hour run would have measured its credits draining. A c8gn.4xlarge has a flat 50 Gbps (baseline and peak, per `describe-instance-types` on 2026-11-06), and the 12 cores the server doesn't use carry the NIC's interrupts. The x86 c8i may follow by amendment.
+- **Client:** c8gn.4xlarge (16 vCPUs, network-optimized) running oha 1.16.0, in the same availability zone and cluster placement group. Every step opens fresh connections to one server port, so the client widens its local port range to 1024–65535 and reuses TIME_WAIT ports for outgoing connections (`tcp_tw_reuse=1`); the first smoke ran out of ports without it, and every request of the steps that followed failed at the client.
 - **Slow clients:** on the server, `tc qdisc replace dev <nic> root fq maxrate 10mbit` paces every flow; on the client, `netem delay 40ms` adds the round trip. Both are removed after the cell.
-- **The network ceiling:** at about 1.875 Gbps sustained, `323k` cannot exceed about 725 responses/s once burst credits are spent. As in map-tile-servers ADR 0011, a capacity above what the sustained rate carries is capped at it and the page names the servers that hit the ceiling; the server's ENA allowance counters (`bw_out_allowance_exceeded` and the rest) are read before and after every window to confirm it. CPU per response and memory at the ceiling still separate the servers.
+- **The network ceiling:** at 50 Gbps, `323k` cannot exceed about 19,000 responses/s and `16k` about 380,000. A capacity at that rate is reported as the network's, and the server's ENA allowance counters (`bw_out_allowance_exceeded` and the rest) are read before and after every window to confirm it. CPU per response and memory at the ceiling still separate the servers.
 
 ### Measurement
 
@@ -83,7 +83,7 @@ A smoke runs every cell with 100 slow clients and shortened steps.
 
 ### Budget
 
-A smoke may spend up to $2 and 30 minutes. A framework run (one dispatch: three passes in turn, each on a fresh instance pair) may spend up to $15 and 3 hours, and a change run up to $10 and 3 hours. A pair costs about $1.11 an hour.
+A smoke may spend up to $2 and 30 minutes. A framework run (one dispatch: three passes in turn, each on a fresh instance pair) may spend up to $15 and 3 hours, and a change run up to $10 and 3 hours. A pair (two c8gn.4xlarge) costs about $1.90 an hour.
 
 ## Consequences
 

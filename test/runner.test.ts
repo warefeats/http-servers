@@ -182,7 +182,7 @@ describe("oha", () => {
     const a = parseOha(json);
     const b = { ...a, success: 10, completed: 10, statusCodes: { "200": 10 }, p99Ms: 40, p50Ms: 1 };
     const m = mergePasses([a, b]);
-    expect(m).toMatchObject({ completed: 7010, success: 7000, p99Ms: 40, p50Ms: 2.1, statusCodes: { "200": 7000, "503": 10 } });
+    expect(m).toMatchObject({ completed: 7010, success: 7000, p99Ms: 40, p50Ms: 2.1, statusCodes: { "200": 7000, "503": 10 }, errors: { "connection reset": 6 } });
   });
 
   test("a delivery-only failure with fast answers is the generator's", () => {

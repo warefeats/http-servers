@@ -9,7 +9,7 @@ import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { type Candidate, isLane, LANES, type LaneId, planCandidates } from "./candidates";
 import { arg, numberArg } from "./cli";
-import { AgentClient, type CellResult, capacityCell, type Env, slowCell } from "./measure";
+import { AgentClient, bulkCell, type CellResult, capacityCell, type Env, slowCell } from "./measure";
 import { hostTicks, HZ, resolveNic } from "./proc";
 import { type Cell, protocol, type Protocol } from "./protocol";
 import { renderReport } from "./report";
@@ -60,21 +60,28 @@ async function sha256(buf: ArrayBuffer): Promise<string> {
   return h.digest("hex").slice(0, 16);
 }
 
-/** Every route of every candidate: status, framing and the body's hash, which must match across candidates. */
-async function preflight(env: Env, candidates: readonly Candidate[]): Promise<Record<string, Record<string, string>>> {
+/**
+ * Every route the cells use, in every candidate: status, framing and the body's hash, which must match across
+ * candidates, and a bulk cell's size, which must be the size the cell expects.
+ */
+async function preflight(env: Env, candidates: readonly Candidate[], cells: readonly Cell[]): Promise<Record<string, Record<string, string>>> {
+  const routes = [...new Set(cells.map((c) => c.route))];
   const out: Record<string, Record<string, string>> = {};
   for (const c of candidates) {
     await env.agent.start(c.id);
     try {
       const answers: Record<string, string> = {};
       out[c.id] = answers;
-      for (const route of ["/json", "/16k", "/323k"]) {
+      for (const route of routes) {
         const r = await fetch(`${env.target}${route}`, { headers: { "accept-encoding": "identity" } });
         const body = await r.arrayBuffer();
         const framing = r.headers.get("transfer-encoding") ? `chunked` : `length ${r.headers.get("content-length")}`;
         const line = `${r.status} ${framing} ${r.headers.get("content-type")} ${await sha256(body)}`;
         answers[route] = line;
         if (r.status !== 200) throw new Error(`${c.id} ${route}: ${line}`);
+        for (const cell of cells) {
+          if (cell.kind === "bulk" && cell.route === route && body.byteLength !== cell.bytes) throw new Error(`${c.id} ${route}: ${body.byteLength} bytes where the ${cell.id} cell expects ${cell.bytes}`);
+        }
       }
     } finally {
       await env.agent.stop();
@@ -82,7 +89,7 @@ async function preflight(env: Env, candidates: readonly Candidate[]): Promise<Re
   }
   const first = candidates[0];
   for (const c of candidates) {
-    for (const route of ["/json", "/16k", "/323k"]) {
+    for (const route of routes) {
       const a = first ? out[first.id]?.[route] : undefined;
       const b = out[c.id]?.[route];
       if (a !== b) throw new Error(`preflight: ${c.id} ${route} answers "${b}" where ${first?.id} answers "${a}"`);
@@ -168,7 +175,7 @@ async function main(): Promise<void> {
       cells: [],
     };
     console.log(`== ${lane.id} ${modeArg}${local ? " (local)" : ""}: ${candidates.map((c) => c.label).join(", ")}; ${p.passes} pass(es) from pass ${firstPass}; cells ${p.cells.map((c) => c.id).join(", ")}; results ${file}`);
-    run.preflight = await preflight(env, candidates);
+    run.preflight = await preflight(env, candidates, p.cells);
     console.log("== preflight: every route answers the same status, framing and bytes in every candidate");
     save(file, run);
     for (let pass = firstPass; pass < firstPass + p.passes; pass++) {
@@ -178,7 +185,7 @@ async function main(): Promise<void> {
           console.log(`-- pass ${pass} ${cell.id} ${a}`);
           const startedAt = new Date().toISOString();
           try {
-            const r = cell.kind === "capacity" ? await capacityCell(env, id, cell, p, beforeWindow) : await slowCell(env, id, cell, p, beforeWindow);
+            const r = cell.kind === "capacity" ? await capacityCell(env, id, cell, p, beforeWindow) : cell.kind === "slow" ? await slowCell(env, id, cell, p, beforeWindow) : await bulkCell(env, id, cell, p, beforeWindow);
             run.cells.push({ ...r, pass, cell: cell.id, arm: a, candidate: id, startedAt });
             if (r.capacity) console.log(`   ${a} ${cell.id}: capacity ${r.capacity.capacityRps.toLocaleString("en-US")}/s${r.capacity.atCeiling ? " (search ceiling)" : ""}${r.capacity.floor ? " (client-bound: a floor)" : ""}, peak growth ${r.peakGrowthMb?.toFixed(1) ?? "–"} MB`);
           } catch (e) {

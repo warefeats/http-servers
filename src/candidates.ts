@@ -60,11 +60,11 @@ export const LANES: Record<LaneId, Lane> = {
 
 /**
  * The crates of a framework's workspace that a git candidate must take from its commit. actix-web's own
- * crates depend on each other by crates.io version, so each needs a patch; axum's reach axum-core by path
- * inside the same checkout, so none do.
+ * crates depend on each other by crates.io version, actix-files on actix-web itself, so each needs a patch;
+ * axum's reach axum-core by path inside the same checkout, so none do.
  */
 export const WORKSPACE_CRATES: Record<Framework, readonly string[]> = {
-  "actix-web": ["actix-http", "actix-router", "actix-web-codegen"],
+  "actix-web": ["actix-web", "actix-http", "actix-router", "actix-web-codegen", "actix-files"],
   axum: [],
 };
 

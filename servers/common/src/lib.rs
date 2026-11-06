@@ -1,7 +1,14 @@
-//! What every bench server shares: the listener, the byte bodies and the JSON document
+//! What every bench server shares: the listener, the byte bodies, the file and the JSON document
 //! (docs/adr/0001-what-the-benchmark-answers.md, "The servers").
 
-use std::{env, io, net::SocketAddr, sync::LazyLock};
+use std::{
+    env,
+    fs::{self, File},
+    io::{self, BufWriter, Write},
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::LazyLock,
+};
 
 use bytes::Bytes;
 use serde::Serialize;
@@ -10,19 +17,61 @@ use socket2::{Domain, Socket, Type};
 /// actix-web's default listen backlog, used by every server (ADR 0001, "One equalization").
 pub const BACKLOG: i32 = 1024;
 
+/// Every byte body and the file hold byte `i % PERIOD` at offset `i`.
+const PERIOD: usize = 251;
+
 fn pattern(len: usize) -> Bytes {
-    Bytes::from((0..len).map(|i| (i % 251) as u8).collect::<Vec<u8>>())
+    Bytes::from((0..len).map(|i| (i % PERIOD) as u8).collect::<Vec<u8>>())
 }
 
 /// The `/16k` body.
 pub static B16K: LazyLock<Bytes> = LazyLock::new(|| pattern(16 * 1024));
-/// The `/323k` body.
+/// The `/323k` body, one buffer that every response clones.
 pub static B323K: LazyLock<Bytes> = LazyLock::new(|| pattern(323_000));
 
-/// Builds the byte bodies before the server answers its first request.
-pub fn init() {
+/// The `/323k-fresh` body: the bytes of `/323k` copied into a new buffer, as a handler builds a
+/// body of its own on every request.
+pub fn fresh_323k() -> Bytes {
+    Bytes::copy_from_slice(&B323K)
+}
+
+/// The size of the file `/file` serves.
+pub const FILE_LEN: u64 = 64 * 1024 * 1024;
+
+/// The file `/file` serves, in the server's temp directory.
+pub fn file_path() -> PathBuf {
+    env::temp_dir().join("http-servers-bench-64m.bin")
+}
+
+/// Writes the file in blocks of whole pattern periods, so no block needs the whole file in memory
+/// and every block starts where the last one left off.
+fn write_file(path: &Path) -> io::Result<()> {
+    let block: Vec<u8> = (0..PERIOD * 4096).map(|i| (i % PERIOD) as u8).collect();
+    let mut out = BufWriter::new(File::create(path)?);
+    let mut left = FILE_LEN;
+    while left > 0 {
+        let n = left.min(block.len() as u64) as usize;
+        out.write_all(&block[..n])?;
+        left -= n as u64;
+    }
+    out.into_inner()
+        .map_err(io::IntoInnerError::into_error)?
+        .sync_all()
+}
+
+/// Builds the byte bodies, and writes the file when it is missing, before the server answers its
+/// first request.
+pub fn init() -> io::Result<()> {
     LazyLock::force(&B16K);
     LazyLock::force(&B323K);
+    let path = file_path();
+    if fs::metadata(&path).map(|m| m.len()).ok() != Some(FILE_LEN) {
+        // under a temporary name first, so no server ever serves part of the file
+        let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+        write_file(&tmp)?;
+        fs::rename(&tmp, &path)?;
+    }
+    Ok(())
 }
 
 /// The listener every server serves on: `ADDR` (default `0.0.0.0:8080`), backlog [`BACKLOG`],

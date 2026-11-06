@@ -1,0 +1,20 @@
+{
+  "runId": "change-full-42170865139-1-p1",
+  "githubRunId": "42170865139",
+  "lane": "change",
+  "mode": "full",
+  "candidates": "",
+  "pass": 1,
+  "passes": 1,
+  "region": "us-east-1",
+  "zone": "us-east-1a",
+  "ami": "ami-09a93d801db0bafae",
+  "serverType": "c8gn.4xlarge",
+  "clientType": "c8gn.4xlarge",
+  "serverInstance": "i-02993913aad47049c",
+  "clientInstance": "i-0d24ce6f0bca86371",
+  "gitSha": "7fe2631162511bf3e70734485a546945b546fcaa",
+  "launchedAt": "2026-11-06T05:51:39Z",
+  "startedAt": "2026-11-06T05:53:55Z",
+  "endedAt": "2026-11-06T08:33:41Z"
+}

@@ -133,7 +133,8 @@ if (import.meta.main) {
     async fetch(req) {
       const path = new URL(req.url).pathname;
       try {
-        if (req.method === "GET" && path === "/health") return new Response("ok\n");
+        // the CPUs every server is pinned to, for the run's host record (null: none)
+        if (req.method === "GET" && path === "/health") return Response.json({ cpus });
         if (req.method === "GET" && path === "/stats") return Response.json(agent.stats());
         if (req.method === "POST" && path === "/start") return Response.json(await agent.start(startRequest(await json(req))));
         if (req.method === "POST" && path === "/stop") return Response.json(await agent.stop());

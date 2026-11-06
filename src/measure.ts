@@ -51,6 +51,11 @@ export class AgentClient {
     if (pid === null) throw new Error(`agent started ${id} without a pid`);
     return { pid, banner: typeof r["banner"] === "string" ? r["banner"] : "" };
   }
+  /** The CPUs the agent pins every server to, or null when it pins none. */
+  async serverCpus(): Promise<string | null> {
+    const r = await this.call("GET", "/health");
+    return typeof r["cpus"] === "string" ? r["cpus"] : null;
+  }
   async stats(): Promise<Stats> {
     return parseStats(await this.call("GET", "/stats"));
   }

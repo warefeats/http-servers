@@ -57,3 +57,4 @@ Each measured run keeps its report, results, metadata and build record in `runs/
 
 - [42155947807](runs/42155947807/report.md) (2026-11-06): the change lane, six passes on one pair, on the `json`, `16k`, `323k` and `slow-323k` cells.
 - [42170865139](runs/42170865139/report.md) (2026-11-06): the change lane again, six passes on another pair, with the `323k-fresh`, `slow-323k-fresh` and `file` cells added.
+- [42403031469](runs/42403031469/report.md) (2026-11-07): the change lane on #4302 with fixes (c2829f9) against main at 9fb5964, six passes on one pair, with the `json-40k`, `json-323k` and proof cells added and axum left out.

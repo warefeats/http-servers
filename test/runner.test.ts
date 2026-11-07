@@ -302,7 +302,7 @@ describe("run", () => {
 
   test("arms rotate each pass and the change lane adds its A/A arm on json and the proof cells only", () => {
     const base = "actix-web-9fb5964";
-    const head = "actix-web-pr4302-c2829f9";
+    const head = "actix-web-pr4302-2195876";
     expect(arms(cs, 1, { id: "json", kind: "capacity" }, base)).toEqual([base, head, `${base}#aa`]);
     expect(arms(cs, 2, { id: "json", kind: "capacity" }, base)).toEqual([head, `${base}#aa`, base]);
     expect(arms(cs, 2, { id: "16k", kind: "capacity" }, base)).toEqual([head, base]);

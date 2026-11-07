@@ -54,6 +54,12 @@ export const CANDIDATES: readonly Candidate[] = [
     source: { kind: "git", repo: "https://github.com/johncarmack1984/actix-web", rev: "c2829f952b05046f8db0daf16dc0b44e09c566b6" },
   },
   {
+    id: "actix-web-pr4302-2195876",
+    framework: "actix-web",
+    label: "actix-web #4302 with fixes 2195876",
+    source: { kind: "git", repo: "https://github.com/johncarmack1984/actix-web", rev: "21958769ebba90638142b8aaa33e504e9b6bc694" },
+  },
+  {
     id: "axum-40d061f",
     framework: "axum",
     label: "axum main 40d061f",
@@ -67,8 +73,8 @@ export const LANES: Record<LaneId, Lane> = {
   // passes inside the budget (ADR 0001, "Cells" and "Budget")
   change: {
     id: "change",
-    candidates: ["actix-web-9fb5964", "actix-web-pr4302-c2829f9"],
-    pair: { base: "actix-web-9fb5964", head: "actix-web-pr4302-c2829f9" },
+    candidates: ["actix-web-9fb5964", "actix-web-pr4302-2195876"],
+    pair: { base: "actix-web-9fb5964", head: "actix-web-pr4302-2195876" },
   },
 };
 

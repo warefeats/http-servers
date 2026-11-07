@@ -1,13 +1,16 @@
 /**
  * The server instance's agent (docs/adr/0001-what-the-benchmark-answers.md, "Measurement"): runs one
- * candidate's server at a time, reports its CPU time and memory from /proc and the NIC's counters, and on the
- * rig paces every outgoing flow for the slow-client cell. It starts only binaries in --bin-dir.
+ * candidate's server at a time, reports its CPU time and memory from /proc and the NIC's counters, on the rig
+ * paces every outgoing flow for the slow-client cell, and for the proof cells runs wrk against the server over
+ * loopback. It starts only binaries in --bin-dir.
  *   bun run src/agent.ts --bin-dir=build/bin [--port=9000] [--nic=auto|none|<iface>] [--cpus=0-7] [--server-port=8080]
  */
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { arg, numberArg } from "./cli";
+import type { OhaPass } from "./oha";
 import { hostTicks, nicCounters, processMemory, processTicks, resolveNic } from "./proc";
+import { parseWrk, wrkArgs } from "./wrk";
 
 export interface StartRequest {
   id: string;
@@ -40,6 +43,48 @@ export function startRequest(body: unknown): StartRequest {
     }
   }
   return { id: body.id, env };
+}
+
+/** A proof cell's wrk run: the route on the running server, wrk's connections, threads, seconds and CPUs. */
+export interface LoopbackRequest {
+  route: string;
+  connections: number;
+  threads: number;
+  seconds: number;
+  cpus: string;
+}
+
+export interface LoopbackResult {
+  pass: OhaPass;
+  /** wrk's own user plus system time. */
+  cpuS: number;
+  command: string;
+}
+
+export function loopbackRequest(body: unknown): LoopbackRequest {
+  if (typeof body !== "object" || body === null) throw new Error("loopback needs an object");
+  const fields = new Map<string, unknown>(Object.entries(body));
+  const route = fields.get("route");
+  const cpus = fields.get("cpus");
+  if (typeof route !== "string" || !/^\/[a-z0-9-]*$/.test(route)) throw new Error("loopback needs a route of lowercase letters, digits and dashes");
+  if (typeof cpus !== "string" || !/^\d+(-\d+)?(,\d+(-\d+)?)*$/.test(cpus)) throw new Error("loopback needs a taskset CPU list");
+  const whole = (k: string, lo: number, hi: number) => {
+    const v = fields.get(k);
+    if (typeof v !== "number" || !Number.isInteger(v) || v < lo || v > hi) throw new Error(`loopback ${k} must be a whole number from ${lo} to ${hi}`);
+    return v;
+  };
+  return { route, connections: whole("connections", 1, 100_000), threads: whole("threads", 1, 64), seconds: whole("seconds", 1, 120), cpus };
+}
+
+/** wrk's version line, or null where wrk is missing. */
+function wrkVersion(): string | null {
+  try {
+    const r = Bun.spawnSync({ cmd: ["wrk", "-v"], stdout: "pipe", stderr: "pipe" });
+    const line = `${r.stdout.toString()}${r.stderr.toString()}`.split("\n").find((l) => l.startsWith("wrk "));
+    return line?.trim() ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** The tc command that paces every flow at `mbit`, or restores the interface's default qdisc. */
@@ -106,6 +151,17 @@ class Agent {
     return { stopped: true };
   }
 
+  /** wrk against the running server over loopback, pinned to `req.cpus`, for one proof window. */
+  async loopback(req: LoopbackRequest): Promise<LoopbackResult> {
+    if (!this.server) throw new Error("no server running");
+    const cmd = wrkArgs({ url: `http://127.0.0.1:${this.serverPort}${req.route}`, connections: req.connections, threads: req.threads, durationSeconds: req.seconds, cpus: req.cpus, timeoutSeconds: 10 });
+    const proc = Bun.spawn({ cmd, stdout: "pipe", stderr: "pipe", timeout: (req.seconds + 30) * 1000 });
+    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    if (code !== 0) throw new Error(`wrk exited ${code}: ${err.slice(0, 400)}`);
+    const cpu = proc.resourceUsage()?.cpuTime;
+    return { pass: parseWrk(out), cpuS: cpu ? Number(cpu.user + cpu.system) / 1e6 : Number.NaN, command: cmd.join(" ") };
+  }
+
   shape(mbit: number | null): { nic: string; command: string } {
     if (!this.nic) throw new Error("no NIC to shape (started with --nic=none)");
     const cmd = shapeCommand(this.nic, mbit);
@@ -127,17 +183,19 @@ if (import.meta.main) {
   const nic = resolveNic(arg("nic") ?? "none");
   const cpus = arg("cpus") ?? null;
   const agent = new Agent(binDir, numberArg("server-port", 8080), nic, cpus);
+  const wrk = wrkVersion();
   Bun.serve({
     port,
     hostname: "0.0.0.0",
     async fetch(req) {
       const path = new URL(req.url).pathname;
       try {
-        // the CPUs every server is pinned to, for the run's host record (null: none)
-        if (req.method === "GET" && path === "/health") return Response.json({ cpus });
+        // the CPUs every server is pinned to and wrk's version, for the run's host record (null: none)
+        if (req.method === "GET" && path === "/health") return Response.json({ cpus, wrk });
         if (req.method === "GET" && path === "/stats") return Response.json(agent.stats());
         if (req.method === "POST" && path === "/start") return Response.json(await agent.start(startRequest(await json(req))));
         if (req.method === "POST" && path === "/stop") return Response.json(await agent.stop());
+        if (req.method === "POST" && path === "/loopback") return Response.json(await agent.loopback(loopbackRequest(await json(req))));
         if (req.method === "POST" && path === "/shape") {
           const body = await json(req);
           const mbit = typeof body === "object" && body !== null && "flowRateMbit" in body && typeof body.flowRateMbit === "number" ? body.flowRateMbit : null;
@@ -149,5 +207,5 @@ if (import.meta.main) {
       }
     },
   });
-  console.log(`agent on :${port}, binaries in ${binDir}, nic ${nic ?? "none"}, server cpus ${cpus ?? "all"}`);
+  console.log(`agent on :${port}, binaries in ${binDir}, nic ${nic ?? "none"}, server cpus ${cpus ?? "all"}, ${wrk ?? "no wrk"}`);
 }

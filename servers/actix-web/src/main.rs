@@ -5,10 +5,22 @@ use std::io;
 
 use actix_files::NamedFile;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-use bench_common::{banner, file_path, fresh_323k, init, listener, page, B16K, B323K};
+use bench_common::{
+    banner, catalog, file_path, fresh_323k, init, listener, page, B16K, B323K, JSON_323K_ITEMS,
+    JSON_40K_ITEMS,
+};
 
 async fn json() -> impl Responder {
     HttpResponse::Ok().json(page())
+}
+
+/// A large JSON response through the same responder, the body `.json()` builds in a `String`.
+async fn json_40k() -> impl Responder {
+    HttpResponse::Ok().json(catalog(JSON_40K_ITEMS))
+}
+
+async fn json_323k() -> impl Responder {
+    HttpResponse::Ok().json(catalog(JSON_323K_ITEMS))
 }
 
 async fn b16k() -> impl Responder {
@@ -42,6 +54,8 @@ async fn main() -> io::Result<()> {
     HttpServer::new(|| {
         App::new()
             .route("/json", web::get().to(json))
+            .route("/json-40k", web::get().to(json_40k))
+            .route("/json-323k", web::get().to(json_323k))
             .route("/16k", web::get().to(b16k))
             .route("/323k", web::get().to(b323k))
             .route("/323k-fresh", web::get().to(b323k_fresh))

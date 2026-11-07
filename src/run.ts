@@ -9,9 +9,9 @@ import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { type Candidate, isLane, LANES, type LaneId, planCandidates } from "./candidates";
 import { arg, numberArg } from "./cli";
-import { AgentClient, bulkCell, type CellResult, capacityCell, type Env, slowCell } from "./measure";
+import { AgentClient, bulkCell, type CellResult, capacityCell, type Env, proofCell, slowCell } from "./measure";
 import { hostTicks, HZ, resolveNic } from "./proc";
-import { type Cell, protocol, type Protocol } from "./protocol";
+import { type Cell, hasAaArm, protocol, type Protocol } from "./protocol";
 import { renderReport } from "./report";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -19,7 +19,7 @@ const ROOT = resolve(import.meta.dir, "..");
 export interface CellRecord extends CellResult {
   pass: number;
   cell: Cell["id"];
-  /** The candidate id, with `#aa` for the change lane's second base run on `json`. */
+  /** The candidate id, with `#aa` for the change lane's second base run on `json` and the proof cells. */
   arm: string;
   candidate: string;
   startedAt: string;
@@ -41,12 +41,25 @@ export interface RunFile {
   cells: CellRecord[];
 }
 
-/** Arms for one cell in one pass: the candidates rotated by the pass, plus the A/A arm on `json` in the change lane. */
-export function arms(candidates: readonly Candidate[], pass: number, cell: Cell["id"], aaBase: string | null): string[] {
+/** Arms for one cell in one pass: the candidates rotated by the pass, plus the change lane's A/A arm where the cell has one. */
+export function arms(candidates: readonly Candidate[], pass: number, cell: Pick<Cell, "id" | "kind">, aaBase: string | null): string[] {
   const ids = candidates.map((c) => c.id);
-  if (aaBase && cell === "json") ids.push(`${aaBase}#aa`);
+  if (aaBase && hasAaArm(cell)) ids.push(`${aaBase}#aa`);
   const k = (pass - 1) % ids.length;
   return [...ids.slice(k), ...ids.slice(0, k)];
+}
+
+function measureCell(env: Env, id: string, cell: Cell, p: Protocol, beforeWindow: () => Promise<void>): Promise<CellResult> {
+  switch (cell.kind) {
+    case "capacity":
+      return capacityCell(env, id, cell, p, beforeWindow);
+    case "slow":
+      return slowCell(env, id, cell, p, beforeWindow);
+    case "bulk":
+      return bulkCell(env, id, cell, p, beforeWindow);
+    case "proof":
+      return proofCell(env, id, cell, p, beforeWindow);
+  }
 }
 
 function save(path: string, run: RunFile): void {
@@ -169,7 +182,7 @@ async function main(): Promise<void> {
       pair,
       candidates: candidates.map((c) => ({ id: c.id, label: c.label })),
       protocol: p,
-      host: { hostname: (await Bun.$`hostname`.text()).trim(), kernel: (await Bun.$`uname -r`.text()).trim(), cpus: String(navigator.hardwareConcurrency), oha: (await Bun.$`oha --version`.text()).trim(), ohaProcesses: String(generators), clientPorts: (await Bun.file("/proc/sys/net/ipv4/ip_local_port_range").text()).trim().replace(/\s+/g, "-"), clientTwReuse: (await Bun.file("/proc/sys/net/ipv4/tcp_tw_reuse").text()).trim(), clientCpus: clientCpus ?? "all", serverCpus: (await env.agent.serverCpus()) ?? "all" },
+      host: { hostname: (await Bun.$`hostname`.text()).trim(), kernel: (await Bun.$`uname -r`.text()).trim(), cpus: String(navigator.hardwareConcurrency), oha: (await Bun.$`oha --version`.text()).trim(), ohaProcesses: String(generators), clientPorts: (await Bun.file("/proc/sys/net/ipv4/ip_local_port_range").text()).trim().replace(/\s+/g, "-"), clientTwReuse: (await Bun.file("/proc/sys/net/ipv4/tcp_tw_reuse").text()).trim(), clientCpus: clientCpus ?? "all", serverCpus: (await env.agent.serverCpus()) ?? "all", wrk: (await env.agent.wrkVersion()) ?? "none" },
       preflight: {},
       startedAt: new Date().toISOString(),
       cells: [],
@@ -180,12 +193,12 @@ async function main(): Promise<void> {
     save(file, run);
     for (let pass = firstPass; pass < firstPass + p.passes; pass++) {
       for (const cell of p.cells) {
-        for (const a of arms(candidates, pass, cell.id, aaBase)) {
+        for (const a of arms(candidates, pass, cell, aaBase)) {
           const id = a.replace(/#aa$/, "");
           console.log(`-- pass ${pass} ${cell.id} ${a}`);
           const startedAt = new Date().toISOString();
           try {
-            const r = cell.kind === "capacity" ? await capacityCell(env, id, cell, p, beforeWindow) : cell.kind === "slow" ? await slowCell(env, id, cell, p, beforeWindow) : await bulkCell(env, id, cell, p, beforeWindow);
+            const r = await measureCell(env, id, cell, p, beforeWindow);
             run.cells.push({ ...r, pass, cell: cell.id, arm: a, candidate: id, startedAt });
             if (r.capacity) console.log(`   ${a} ${cell.id}: capacity ${r.capacity.capacityRps.toLocaleString("en-US")}/s${r.capacity.atCeiling ? " (search ceiling)" : ""}${r.capacity.floor ? " (client-bound: a floor)" : ""}, peak growth ${r.peakGrowthMb?.toFixed(1) ?? "–"} MB`);
           } catch (e) {

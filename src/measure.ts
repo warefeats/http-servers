@@ -3,11 +3,12 @@
  * through the agent, then a capacity search or the slow-client window, with the server's CPU time and memory
  * read around every recorded window.
  */
-import type { Stats } from "./agent";
+import type { LoopbackRequest, LoopbackResult, Stats } from "./agent";
 import { type Capacity, findCapacity, HOLD, held, type StepOutcome } from "./capacity";
 import { type OhaPass, runOha } from "./oha";
 import { HZ } from "./proc";
-import { type BulkCell, type CapacityCell, connectionsFor, type Protocol, type SlowCell } from "./protocol";
+import { type BulkCell, type CapacityCell, connectionsFor, type ProofCell, type Protocol, type SlowCell } from "./protocol";
+import { cpuCount, firstCpus } from "./wrk";
 
 type Json = Record<string, unknown>;
 
@@ -34,11 +35,36 @@ export function parseStats(v: unknown): Stats {
   return { pid: num(v, "pid"), ticks: num(v, "ticks"), rssKb: num(v, "rssKb"), hwmKb: num(v, "hwmKb"), threads: num(v, "threads"), hostBusyTicks: busy, hostTotalTicks: total, nic: numbers(v["nic"]) };
 }
 
+/** A load generator's pass as the agent sends it (the proof cells' wrk), field by field. */
+export function parsePass(v: unknown): OhaPass {
+  if (!isJson(v)) throw new Error("agent pass is not an object");
+  const need = (k: string) => {
+    const x = num(v, k);
+    if (x === null) throw new Error(`agent pass lacks ${k}`);
+    return x;
+  };
+  return {
+    completed: need("completed"),
+    success: need("success"),
+    transportErrors: need("transportErrors"),
+    abortedAtDeadline: need("abortedAtDeadline"),
+    statusCodes: numbers(v["statusCodes"]),
+    errors: numbers(v["errors"]),
+    p50Ms: num(v, "p50Ms"),
+    p90Ms: num(v, "p90Ms"),
+    p99Ms: num(v, "p99Ms"),
+    p999Ms: num(v, "p999Ms"),
+    maxMs: num(v, "maxMs"),
+    durationS: need("durationS"),
+    bytesPerResponse: num(v, "bytesPerResponse"),
+  };
+}
+
 export class AgentClient {
   constructor(readonly url: string) {}
 
-  private async call(method: "GET" | "POST", path: string, body?: unknown): Promise<Json> {
-    const r = await fetch(`${this.url}${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body), headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(30_000) });
+  private async call(method: "GET" | "POST", path: string, body?: unknown, timeoutMs = 30_000): Promise<Json> {
+    const r = await fetch(`${this.url}${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body), headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(timeoutMs) });
     const data: unknown = await r.json();
     if (!isJson(data)) throw new Error(`agent ${path}: not a JSON object`);
     if (!r.ok) throw new Error(`agent ${path}: ${typeof data["error"] === "string" ? data["error"] : r.status}`);
@@ -55,6 +81,16 @@ export class AgentClient {
   async serverCpus(): Promise<string | null> {
     const r = await this.call("GET", "/health");
     return typeof r["cpus"] === "string" ? r["cpus"] : null;
+  }
+  /** The version of the wrk the agent runs for the proof cells, or null when it has none. */
+  async wrkVersion(): Promise<string | null> {
+    const r = await this.call("GET", "/health");
+    return typeof r["wrk"] === "string" ? r["wrk"] : null;
+  }
+  /** wrk against the running server, on the agent's host: one proof window. */
+  async loopback(req: LoopbackRequest): Promise<LoopbackResult> {
+    const r = await this.call("POST", "/loopback", req, (req.seconds + 45) * 1000);
+    return { pass: parsePass(r["pass"]), cpuS: num(r, "cpuS") ?? Number.NaN, command: typeof r["command"] === "string" ? r["command"] : "" };
   }
   async stats(): Promise<Stats> {
     return parseStats(await this.call("GET", "/stats"));
@@ -162,6 +198,8 @@ export interface CellResult {
   capacity?: Capacity<StepRecord> & { floor: boolean };
   slow?: WindowRecord;
   bulk?: WindowRecord;
+  /** A proof cell's window: wrk's pass in place of oha's, its CPU as the client's. */
+  proof?: WindowRecord;
 }
 
 async function peak(env: Env, startRssKb: number | null): Promise<number | null> {
@@ -247,4 +285,50 @@ export async function bulkCell(env: Env, id: string, cell: BulkCell, p: Protocol
   const { window: w, ...r } = await closedLoop(env, id, cell.route, cell.connections, p, beforeWindow, {});
   console.log(`    ${id} ${cell.id}: ${gbitPerS(w, cell.bytes).toFixed(2)} Gbit/s (${w.achievedRps.toFixed(1)}/s), p50 ${w.oha.p50Ms} ms, p99 ${w.oha.p99Ms} ms, ${w.usPerResponse?.toFixed(0) ?? "–"} µs/response, client ${(w.clientShare * 100).toFixed(0)}%, peak growth ${r.peakGrowthMb?.toFixed(1) ?? "–"} MB, errors ${(w.errorRate * 100).toFixed(2)}%${topError(w.oha.errors)}`);
   return { ...r, bulk: w };
+}
+
+/**
+ * A proof cell: the Proof bot's wrk over loopback on the server instance, after a warm-up, with the server's
+ * CPU time and memory read around the recorded window. wrk shares the host with the server, so the host's other
+ * work leaves both out.
+ */
+export async function proofCell(env: Env, id: string, cell: ProofCell, p: Protocol, beforeWindow: () => Promise<void>): Promise<CellResult> {
+  // locally the server and the runner already split the host's CPUs: wrk takes as many of the runner's
+  const cpus = env.local && env.clientCpus ? firstCpus(env.clientCpus, cpuCount(cell.cpus)) : cell.cpus;
+  const threads = Math.min(cell.threads, cpuCount(cpus));
+  const started = await env.agent.start(id, cell.sndbuf === null ? {} : { SNDBUF: String(cell.sndbuf) });
+  try {
+    const startRssKb = (await env.agent.stats()).rssKb;
+    const req = { route: cell.route, connections: cell.connections, threads, cpus };
+    await env.agent.loopback({ ...req, seconds: p.proofWarmupS });
+    await beforeWindow();
+    const s0 = await env.agent.stats();
+    const run = await env.agent.loopback({ ...req, seconds: p.proofWindowS });
+    const s1 = await env.agent.stats();
+    const pass = run.pass;
+    const dur = pass.durationS > 0 ? pass.durationS : p.proofWindowS;
+    const serverCpuS = s0.ticks !== null && s1.ticks !== null ? (s1.ticks - s0.ticks) / HZ : null;
+    const hostBusyS = (s1.hostBusyTicks - s0.hostBusyTicks) / HZ;
+    const clientShare = run.cpuS / (dur * cpuCount(cpus));
+    const w: WindowRecord = {
+      offeredRps: null,
+      connections: cell.connections,
+      oha: pass,
+      achievedRps: pass.success / dur,
+      errorRate: errorRate(pass),
+      serverCpuS,
+      usPerResponse: serverCpuS !== null && pass.success > 0 ? (serverCpuS * 1e6) / pass.success : null,
+      clientCpuS: run.cpuS,
+      clientShare,
+      clientBound: clientShare > p.clientBoundAt,
+      otherCpus: serverCpuS === null ? null : (hostBusyS - serverCpuS - run.cpuS) / dur,
+      nic: delta(s0.nic, s1.nic),
+      rssKb: s1.rssKb,
+    };
+    const peakGrowthMb = await peak(env, startRssKb);
+    console.log(`    ${id} ${cell.id}: ${Math.round(w.achievedRps).toLocaleString("en-US")}/s, p50 ${pass.p50Ms?.toFixed(2) ?? "–"} ms, p99 ${pass.p99Ms?.toFixed(2) ?? "–"} ms, ${w.usPerResponse?.toFixed(1) ?? "–"} µs/response, wrk ${(clientShare * 100).toFixed(0)}% of ${cpuCount(cpus)} CPUs, peak growth ${peakGrowthMb?.toFixed(1) ?? "–"} MB, errors ${(w.errorRate * 100).toFixed(2)}%${topError(pass.errors)}`);
+    return { banner: started.banner, startRssKb, peakGrowthMb, proof: w };
+  } finally {
+    await env.agent.stop();
+  }
 }

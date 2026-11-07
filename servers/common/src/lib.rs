@@ -128,7 +128,20 @@ const TAGS: [&str; 6] = ["outdoor", "steel", "refurbished", "bulk", "eco", "impo
 /// The `/json` document, built on every request as a handler builds one from its rows:
 /// eight items, about 1 KB serialized.
 pub fn page() -> Page {
-    let items = (0..8u32)
+    catalog(8)
+}
+
+/// Items in the `/json-40k` document: 40,039 bytes serialized, past the 32 KiB at which actix-web
+/// #4302 writes a body from its own buffer and under the 128 KiB write buffer actix-web keeps.
+pub const JSON_40K_ITEMS: u32 = 263;
+/// Items in the `/json-323k` document: 323,142 bytes serialized, the size of `/323k`.
+pub const JSON_323K_ITEMS: u32 = 2_100;
+
+/// A page of `items` items, built on every request like `/json`'s. actix-web's `.json()` serializes
+/// it into a `String` that grows by doubling, so the bytes sit in more memory than they fill: 40,039
+/// bytes in 64 KiB, 323,142 in 512 KiB.
+pub fn catalog(items: u32) -> Page {
+    let rows = (0..items)
         .map(|i| Item {
             id: 10_000 + i,
             sku: format!("WF-{:05}-{}", 31_337 + i * 17, i % 3),
@@ -138,5 +151,5 @@ pub fn page() -> Page {
             in_stock: i % 4 != 0,
         })
         .collect();
-    Page { page: 1, per_page: 8, total: 240, items }
+    Page { page: 1, per_page: items, total: 30 * items, items: rows }
 }

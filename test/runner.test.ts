@@ -1,17 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { shapeCommand, startRequest } from "../src/agent";
+import { loopbackRequest, shapeCommand, startRequest } from "../src/agent";
 import { foreignPackages, lockPackages, pairDrift } from "../src/build";
 import { candidate, CANDIDATES, LANES, manifestParts, planCandidates, renderManifest } from "../src/candidates";
 import { findCapacity, held, highestCommonHeld, type StepOutcome } from "../src/capacity";
 import { arg } from "../src/cli";
-import { errorRate, gbitPerS, generatorShortfall, netemCommand, parseStats } from "../src/measure";
+import { errorRate, gbitPerS, generatorShortfall, netemCommand, parsePass, parseStats } from "../src/measure";
 import { mergePasses, ohaArgs, parseOha, shares } from "../src/oha";
 import { hostTicks, parseEthtool } from "../src/proc";
-import { connectionsFor, protocol } from "../src/protocol";
+import { connectionsFor, hasAaArm, protocol } from "../src/protocol";
 import { arms } from "../src/run";
 import { bootstrapMedian, median, overlaps, tInterval, verdict } from "../src/stats";
+import { cpuCount, firstCpus, parseWrk, wrkArgs, wrkDuration } from "../src/wrk";
 
 const ROOT = join(import.meta.dir, "..");
 
@@ -218,9 +219,71 @@ describe("agent", () => {
     expect(netemCommand("ens5", null)).toEqual(["tc", "qdisc", "del", "dev", "ens5", "root"]);
   });
 
+  test("a loopback run names a plain route, whole numbers in range and a taskset list", () => {
+    expect(loopbackRequest({ route: "/323k", connections: 256, threads: 4, seconds: 8, cpus: "4-7" })).toEqual({ route: "/323k", connections: 256, threads: 4, seconds: 8, cpus: "4-7" });
+    expect(() => loopbackRequest({ route: "/323k; rm", connections: 256, threads: 4, seconds: 8, cpus: "4-7" })).toThrow("route");
+    expect(() => loopbackRequest({ route: "/323k", connections: 256, threads: 4, seconds: 8, cpus: "4-7 && x" })).toThrow("CPU list");
+    expect(() => loopbackRequest({ route: "/323k", connections: 0, threads: 4, seconds: 8, cpus: "4-7" })).toThrow("connections");
+    expect(() => loopbackRequest({ route: "/323k", connections: 256, threads: 2.5, seconds: 8, cpus: "4-7" })).toThrow("threads");
+  });
+
+  test("a load generator's pass arrives field by field", () => {
+    const pass = parseWrk(WRK_OUTPUT);
+    expect(parsePass(JSON.parse(JSON.stringify(pass)))).toEqual(pass);
+    expect(() => parsePass({ completed: 1 })).toThrow("lacks");
+  });
+
   test("stats arrive field by field", () => {
     expect(parseStats({ pid: 7, ticks: 120, rssKb: 9000, hwmKb: 9100, threads: 10, hostBusyTicks: 5, hostTotalTicks: 9, nic: { tx_bytes: 4, bad: "x" } })).toEqual({ pid: 7, ticks: 120, rssKb: 9000, hwmKb: 9100, threads: 10, hostBusyTicks: 5, hostTotalTicks: 9, nic: { tx_bytes: 4 } });
     expect(() => parseStats({ pid: 7 })).toThrow("host ticks");
+  });
+});
+
+const WRK_OUTPUT = `Running 8s test @ http://127.0.0.1:8080/323k
+  4 threads and 256 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     1.77ms  520.31us  21.40ms   81.25%
+    Req/Sec    36.42k     2.10k   41.03k    70.31%
+  Latency Distribution
+     50%    1.70ms
+     75%    2.01ms
+     90%    2.38ms
+     99%    3.52ms
+  1160321 requests in 8.00s, 349.07GB read
+  Socket errors: connect 0, read 12, write 0, timeout 3
+  Non-2xx or 3xx responses: 5
+Requests/sec: 145037.51
+Transfer/sec:     43.63GB
+`;
+
+describe("wrk", () => {
+  test("pins wrk to its CPUs with the bot's flags and a 10 s timeout", () => {
+    expect(wrkArgs({ url: "http://127.0.0.1:8080/323k", connections: 256, threads: 4, durationSeconds: 8, cpus: "4-7", timeoutSeconds: 10 })).toEqual(["taskset", "-c", "4-7", "wrk", "--latency", "-t", "4", "-c", "256", "-d", "8s", "--timeout", "10s", "http://127.0.0.1:8080/323k"]);
+  });
+
+  test("reads durations in every unit wrk prints", () => {
+    expect(wrkDuration("520.31us")).toBeCloseTo(0.52031, 6);
+    expect(wrkDuration("1.77ms")).toBe(1.77);
+    expect(wrkDuration("8.00s")).toBe(8000);
+    expect(wrkDuration("2.00m")).toBe(120_000);
+    expect(wrkDuration("fast")).toBeNull();
+  });
+
+  test("parses counts, socket errors, non-2xx answers and the --latency percentiles", () => {
+    expect(parseWrk(WRK_OUTPUT)).toEqual({ completed: 1_160_321, success: 1_160_316, transportErrors: 15, abortedAtDeadline: 0, statusCodes: {}, errors: { read: 12, timeout: 3 }, p50Ms: 1.7, p90Ms: 2.38, p99Ms: 3.52, p999Ms: null, maxMs: 21.4, durationS: 8, bytesPerResponse: null });
+    const clean = parseWrk(WRK_OUTPUT.replace(/ {2}Socket errors.*\n/, "").replace(/ {2}Non-2xx.*\n/, ""));
+    expect(clean).toMatchObject({ success: 1_160_321, transportErrors: 0, errors: {} });
+    expect(errorRate(clean)).toBe(0);
+    expect(() => parseWrk("unable to connect to 127.0.0.1:8080 Connection refused")).toThrow("no request count");
+  });
+
+  test("counts the CPUs of a taskset list, and takes the first few of one", () => {
+    expect(cpuCount("4-7")).toBe(4);
+    expect(cpuCount("4-11")).toBe(8);
+    expect(cpuCount("4,6,8-11")).toBe(6);
+    expect(firstCpus("8-15", 4)).toBe("8,9,10,11");
+    expect(firstCpus("8,10,12-15", 3)).toBe("8,10,12");
+    expect(cpuCount(firstCpus("8-15", 8))).toBe(8);
   });
 });
 
@@ -237,23 +300,44 @@ describe("proc", () => {
 describe("run", () => {
   const cs = LANES.change.candidates.map(candidate);
 
-  test("arms rotate each pass and the change lane adds its A/A arm on json only", () => {
-    expect(arms(cs, 1, "json", "actix-web-81bb997")).toEqual(["actix-web-81bb997", "actix-web-pr4302", "axum-40d061f", "actix-web-81bb997#aa"]);
-    expect(arms(cs, 2, "json", "actix-web-81bb997")).toEqual(["actix-web-pr4302", "axum-40d061f", "actix-web-81bb997#aa", "actix-web-81bb997"]);
-    expect(arms(cs, 2, "16k", "actix-web-81bb997")).toEqual(["actix-web-pr4302", "axum-40d061f", "actix-web-81bb997"]);
+  test("arms rotate each pass and the change lane adds its A/A arm on json and the proof cells only", () => {
+    const base = "actix-web-9fb5964";
+    const head = "actix-web-pr4302-c2829f9";
+    expect(arms(cs, 1, { id: "json", kind: "capacity" }, base)).toEqual([base, head, `${base}#aa`]);
+    expect(arms(cs, 2, { id: "json", kind: "capacity" }, base)).toEqual([head, `${base}#aa`, base]);
+    expect(arms(cs, 2, { id: "16k", kind: "capacity" }, base)).toEqual([head, base]);
+    expect(arms(cs, 3, { id: "proof-323k", kind: "proof" }, base)).toEqual([`${base}#aa`, base, head]);
+    expect(arms(cs, 1, { id: "proof-323k", kind: "proof" }, null)).toEqual([base, head]);
+    expect(protocol("change", "full", false).cells.filter(hasAaArm).map((c) => c.id)).toEqual(["json", "proof-323k", "proof-323k-wide", "proof-323k-capped", "proof-323k-1000", "proof-323k-fresh-capped", "proof-json-323k-capped", "proof-json-40k"]);
   });
 
   test("protocols: six change passes, one pass per framework pair, short smokes", () => {
     expect(protocol("change", "full", false).passes).toBe(6);
     expect(protocol("frameworks", "full", false).passes).toBe(1);
     expect(protocol("change", "smoke", true)).toMatchObject({ passes: 1, stepS: 2 });
-    expect(protocol("change", "full", false).cells.map((c) => c.id)).toEqual(["json", "16k", "323k", "323k-fresh", "slow-323k", "slow-323k-fresh", "file"]);
+    expect(protocol("change", "full", false).cells.map((c) => c.id)).toEqual(["json", "16k", "323k", "323k-fresh", "json-40k", "json-323k", "slow-323k", "slow-323k-fresh", "slow-json-40k", "slow-json-323k", "file", "proof-323k", "proof-323k-wide", "proof-323k-capped", "proof-323k-1000", "proof-323k-fresh-capped", "proof-json-323k-capped", "proof-json-40k"]);
+    // the proof cells answer a pull request's Proof run: never part of the framework lane's headline
+    expect(protocol("frameworks", "full", false).cells.some((c) => c.kind === "proof")).toBe(false);
+    expect(protocol("change", "smoke", false)).toMatchObject({ proofWarmupS: 1, proofWindowS: 3 });
+    expect(protocol("change", "full", false)).toMatchObject({ proofWarmupS: 2, proofWindowS: 8 });
+  });
+
+  test("the proof cells rebuild the bot's wrk: 4 threads on 4 CPUs at 256 connections, server cores left alone", () => {
+    const proofs = protocol("change", "full", false).cells.flatMap((c) => (c.kind === "proof" ? [c] : []));
+    expect(proofs.find((c) => c.id === "proof-323k")).toEqual({ id: "proof-323k", kind: "proof", route: "/323k", connections: 256, threads: 4, cpus: "4-7", sndbuf: null });
+    expect(proofs.find((c) => c.id === "proof-323k-wide")).toMatchObject({ threads: 8, cpus: "4-11" });
+    expect(proofs.find((c) => c.id === "proof-323k-1000")).toMatchObject({ connections: 1_000, sndbuf: null });
+    for (const c of proofs) {
+      expect(cpuCount(c.cpus)).toBe(c.threads);
+      expect(c.cpus.split(/[-,]/).map(Number).every((n) => n >= 4)).toBe(true);
+    }
+    expect(proofs.filter((c) => c.sndbuf === 65_536).map((c) => c.id)).toEqual(["proof-323k-capped", "proof-323k-fresh-capped", "proof-json-323k-capped"]);
   });
 
   test("the slow cells share their clients and shaping, which the report captions once", () => {
     for (const mode of ["smoke", "full"] as const) {
       const slow = protocol("change", mode, false).cells.flatMap((c) => (c.kind === "slow" ? [{ ...c, id: "", route: "" }] : []));
-      expect(slow.length).toBe(2);
+      expect(slow.length).toBe(4);
       expect(new Set(slow.map((c) => JSON.stringify(c))).size).toBe(1);
     }
   });

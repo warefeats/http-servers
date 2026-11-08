@@ -16,6 +16,7 @@ One bench server per framework in [`servers/`](servers/), written the way each f
 | Route | Response |
 | :-- | :-- |
 | `/json` | a document of about 1 KB, built and serialized on every request with the framework's own JSON responder |
+| `/json-40k`, `/json-323k` | the same document with 263 and 2,100 items, 40,039 and 323,142 bytes, the large API response; actix-web's `.json()` holds those bytes in a `String` of 64 KiB and 512 KiB |
 | `/16k` | 16,384 bytes, under actix-web's 32 KiB write-buffer threshold |
 | `/323k` | 323,000 bytes, the size #4302 was measured on, cloned from one shared buffer |
 | `/323k-fresh` | the same 323,000 bytes, copied into a new buffer on every request as a handler builds its own body |
@@ -28,12 +29,14 @@ Every server runs at its framework's defaults: default features, the default rel
 - `json`, `16k`, `323k`: capacity, the highest open-loop rate a server holds with p99 at most 50 ms, at most 0.1% errors and at least 95% delivered, found by doubling and then bisecting. CPU per response and p99 are read at the highest held rate.
 - `323k-fresh`: the same capacity search on `/323k-fresh`.
 - `slow-323k`, `slow-323k-fresh`: 1,000 keep-alive clients (100 in a smoke) fetching `/323k` or `/323k-fresh` back to back, each flow paced at 10 Mbit/s with a 40 ms round trip on the rig; locally, the listener's send buffer is capped at 128 KiB instead. Peak memory, CPU per response and the response times those clients see.
+- `json-40k`, `json-323k`, `slow-json-40k`, `slow-json-323k`: the capacity and slow-client cells on the large JSON routes.
 - `file`: 64 keep-alive clients downloading `/file` back to back with nothing shaped. Throughput, CPU per response, peak memory and download times; no latency target, since one 64 MiB response alone takes about 11 ms on a 50 Gbps link.
-- The change lane measures its base against itself on `json` every pass (the A/A row), to show the noise floor.
+- `proof-*`, change lane only: the Blacksmith Proof bot's harness rebuilt on the server instance, wrk 4.1.0 over loopback against the server from CPUs it doesn't use, a 2 s warm-up and then the bot's 8 s, at its 256 and 1,000 connections, with and without its 128 KiB send buffer, plus one with wrk on 8 CPUs instead of 4 (ADR 0001, cell 6). Requests per second, latency, server CPU per response, wrk's own CPU and peak memory.
+- The change lane measures its base against itself on `json` and on every proof cell every pass (the A/A rows), to show the noise floor.
 
 ## Running it locally
 
-Needs Rust, bun, and oha 1.16.0 on a Linux machine with at least 16 CPUs.
+Needs Rust, bun, oha 1.16.0 and, for the proof cells, wrk on a Linux machine with at least 16 CPUs.
 
 ```sh
 bun install
@@ -54,3 +57,5 @@ Each measured run keeps its report, results, metadata and build record in `runs/
 
 - [42155947807](runs/42155947807/report.md) (2026-11-06): the change lane, six passes on one pair, on the `json`, `16k`, `323k` and `slow-323k` cells.
 - [42170865139](runs/42170865139/report.md) (2026-11-06): the change lane again, six passes on another pair, with the `323k-fresh`, `slow-323k-fresh` and `file` cells added.
+- [42403031469](runs/42403031469/report.md) (2026-11-07): the change lane on #4302 with fixes (c2829f9) against main at 9fb5964, six passes on one pair, with the `json-40k`, `json-323k` and proof cells added and axum left out.
+- [42418739702](runs/42418739702/report.md) (2026-11-08): the same cells on #4302 with fixes 2195876, which copies a body with spare capacity into the write buffer as main does, against main at 9fb5964.

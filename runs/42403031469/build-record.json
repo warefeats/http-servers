@@ -1,0 +1,62 @@
+{
+  "builtAt": "2026-11-07T18:49:44.679Z",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+  "arch": "arm64",
+  "candidates": [
+    {
+      "id": "actix-web-9fb5964",
+      "label": "actix-web main 9fb5964",
+      "framework": "actix-web",
+      "source": {
+        "kind": "git",
+        "repo": "https://github.com/actix/actix-web",
+        "rev": "9fb59640aebc6a7c87bb79ead55b5730a5425ba4"
+      },
+      "binary": "/opt/bench/build/bin/actix-web-9fb5964",
+      "sha256": "2e9fd2fdd08ef179d6594a9c4b9e4fee309a3a6e658be75a21b9d71da0bf472c",
+      "bytes": 6737720,
+      "seconds": 19.4,
+      "versions": {
+        "tokio": "1.54.1",
+        "mio": "1.2.4",
+        "bytes": "1.12.1",
+        "socket2": "0.6.5",
+        "http": "0.2.12",
+        "actix-http": "3.20.3",
+        "actix-web": "4.18.2",
+        "actix-server": "2.10.0",
+        "actix-rt": "2.15.0",
+        "actix-files": "0.7.4",
+        "serde_json": "1.0.154"
+      }
+    },
+    {
+      "id": "actix-web-pr4302-c2829f9",
+      "label": "actix-web #4302 with fixes c2829f9",
+      "framework": "actix-web",
+      "source": {
+        "kind": "git",
+        "repo": "https://github.com/johncarmack1984/actix-web",
+        "rev": "c2829f952b05046f8db0daf16dc0b44e09c566b6"
+      },
+      "binary": "/opt/bench/build/bin/actix-web-pr4302-c2829f9",
+      "sha256": "43e34e8665b299df0955303c4c257541fa89168f590c467c7fb8a97ecff75603",
+      "bytes": 6738160,
+      "seconds": 18.3,
+      "versions": {
+        "tokio": "1.54.1",
+        "mio": "1.2.4",
+        "bytes": "1.12.1",
+        "socket2": "0.6.5",
+        "http": "0.2.12",
+        "actix-http": "3.20.3",
+        "actix-web": "4.18.2",
+        "actix-server": "2.10.0",
+        "actix-rt": "2.15.0",
+        "actix-files": "0.7.4",
+        "serde_json": "1.0.154"
+      }
+    }
+  ]
+}

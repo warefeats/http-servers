@@ -25,13 +25,14 @@ Facts the design rests on, checked on 2026-11-05:
 ### Two lanes
 
 - **The framework lane** is the headline and the only lane that gets a post. It answers an operator's question: which HTTP server framework to deploy, how many responses a second one instance holds at a latency target, and what that costs. Its candidates are each framework's latest crates.io release, today actix-web 4.18.1 and axum 0.8.9. Each later candidate (hyper on its own, Rocket, Poem, Salvo, ntex, servers in other languages) joins by an amendment that names its documented production setup.
-- **The change lane** answers a pull request's question: does this commit change throughput, latency, CPU or memory against its base? It measures commits, never ranks frameworks, and never becomes a post; its numbers go wherever John takes them. Its first run is actix-web #4302's head (2a3f2019) against its merge-base (81bb9971), with axum's main branch (40d061fd) beside them as a reference, as John asked.
+- **The change lane** answers a pull request's question: does this commit change throughput, latency, CPU or memory against its base? It measures commits, never ranks frameworks, and never becomes a post; its numbers go wherever John takes them. Its first run is actix-web #4302's head (2a3f2019) against its merge-base (81bb9971), with axum's main branch (40d061fd) beside them as a reference, as John asked. Amended 2026-11-07: the next run measures #4302 with its fixes (c2829f95, on the fork's `john/h1-held-body-fixes`) against main at 9fb59640, which #4302 now merges into, and leaves axum out so six passes fit the budget. That run (42403031469) measured the fixes' exact-size copy of a body with spare capacity at about 2% more CPU than main on `/json-323k`, so the fixes became 21958769 (on `john/h1-held-body-fixes-2`), which copies such a body into the write buffer as main does, and the next run measures that commit against the same base.
 
 ### The servers
 
 - One bench server per framework in `servers/<framework>/`, each written the way its docs show: actix-web's `HttpServer` with an `App` of routes; axum's `Router` served by `axum::serve` under `#[tokio::main]`.
-- Five routes, the same response in every server:
+- Seven routes, the same response in every server:
   - `/json`: a document of about 1 KB built and serialized on every request with the framework's own JSON responder, the small API response;
+  - `/json-40k` and `/json-323k`: the same document with 263 and 2,100 items, 40,039 and 323,142 bytes, built and serialized the same way, the large API response. actix-web's `.json()` serializes into a `String` that grows by doubling, so those bytes sit in 64 KiB and 512 KiB (added 2026-11-07, see Cells);
   - `/16k`: 16,384 bytes, a medium response that stays under actix-web's 32 KiB write-buffer threshold;
   - `/323k`: 323,000 bytes, the average of the 50 largest Berlin tiles #4302 was measured on and the bot's body size;
   - `/323k-fresh`: the same 323,000 bytes copied into a new buffer on every request, as a handler builds a body of its own (added 2026-11-06, see Cells);
@@ -55,6 +56,17 @@ Facts the design rests on, checked on 2026-11-05:
 
 Amended 2026-11-06, after the first full change run (Actions run 42155947807) and before any pass of cells 3 and 4: `/16k` and `/323k` clone one shared buffer, as a server answers from a cache or an embedded asset, and in that form `slow-323k` measures actix-web main copying a shared body into every connection's write buffer, the copy #4302 removes. Two forms of a large response that run left out are commoner. A handler builds its body on every request, so each connection holds its own copy however it is written. A large file goes through a file server: actix-files reads it in 64 KiB chunks of a fixed-length body, each one past the 32 KiB that sends a chunk down #4302's path, and tower-http's `ServeFile` also reads 64 KiB at a time.
 
+5. **`json-40k`, `json-323k`, `slow-json-40k`, `slow-json-323k`:** the capacity and slow-client cells on the two large JSON routes.
+6. **The proof cells, change lane only:** the Blacksmith Proof bot's harness rebuilt on the server instance, wrk over loopback from cores the server doesn't use (see Measurement), each with an A/A arm:
+   - `proof-323k`: `/323k`, 256 connections, wrk on 4 CPUs, default buffers, the setup where the bot measured the PR slower;
+   - `proof-323k-wide`: the same with wrk on 8 CPUs, so the client has room to spare and the server sets the rate;
+   - `proof-323k-capped`: the same as `proof-323k` with the bot's 128 KiB send buffer, its headline;
+   - `proof-323k-1000`: 1,000 connections at default buffers, its uncapped run;
+   - `proof-323k-fresh-capped` and `proof-json-323k-capped`: the capped setup on the two bodies built per request, for memory;
+   - `proof-json-40k`: `/json-40k` at default buffers, a body between 32 and 128 KiB.
+
+Amended 2026-11-07, after both change runs and a local check of held memory, and before any pass of cells 5 and 6. `/323k-fresh` builds its body with `Bytes::copy_from_slice`, a buffer exactly its size, but the large body a handler builds is more often a JSON document, whose bytes sit in a `String` grown by doubling. With 200 local clients that never read, #4302 at 2a3f2019 held 542 KB per connection for a 323 KB `.json()` body, against main's 333 KB, which neither run had measured. Cell 5 measures that body. Cell 6 answers the bot, which twice measured the PR slower on loopback at default buffers: 145K against the PR's 103K requests/s at 256 connections in three trials, and 44,951 against 33,095 at 1,000 in one, the first with wrk out of CPU. It rebuilds that setup with six interleaved passes and an A/A arm, plus a run with wrk on 8 CPUs that shows whether the client or the server sets the rate.
+
 A smoke runs every cell with 100 slow clients and shortened steps.
 
 ### Hardware
@@ -71,13 +83,14 @@ A smoke runs every cell with 100 slow clients and shortened steps.
 - **CPU per response:** the server process's user plus system time over the measured window of the highest held step, divided by the responses in it. The client's CPU is recorded for every step; a step where the client used more than 80% of its CPUs is marked client-bound, and a capacity that rests on one is reported as a floor.
 - **Memory:** peak RSS (`VmHWM`) less RSS after startup, per cell.
 - **Latency:** measured at the client, p50, p99 and p99.9 per step.
+- **Proof cells:** the agent runs wrk 4.1.0, Ubuntu's package, on the server instance against 127.0.0.1, pinned to CPUs 4–7 (4–11 for the wide cell) while the server keeps 0–3: a 2 s warm-up, then an 8 s window, the bot's `-d8s`. The bot capped `tcp_wmem` at 128 KiB for the whole machine; these cells cap the listener's send buffer at 64 KiB instead, which the kernel doubles to the same 128 KiB, as local runs do. wrk's own CPU time is kept, and a window where wrk used more than 80% of its CPUs is client-bound. Locally, wrk takes the runner's CPUs.
 - **Passes:** the framework lane runs three passes, each on a fresh instance pair, one after another; the spread between instance pairs is part of the answer. The change lane runs six passes on one instance pair. Within a cell its candidates run back to back, in an order that rotates each pass, and every pass adds an A/A cell (the base against itself on `json`) that shows the noise floor.
 
 ### Result
 
 - **Framework lane, the headline:** capacity per instance for each cell, and its price in dollars per million responses at AWS list prices for the instance (the instance-hour over the responses it holds in an hour). Internet egress is the same bytes for every framework, so it is stated once, not added. Servers are ranked per cell by capacity; a difference counts only when the 95% confidence intervals of the three passes do not overlap, otherwise it is a tie.
 - **Reported, not ranked:** CPU per response, peak memory, p99 at the highest step every server held, the slow-client cells' memory, CPU and response times, and the file cell's throughput, CPU, memory and download times.
-- **Change lane:** for each capacity cell, the ratio of head to base for capacity, CPU per response and p99 at the highest step both held, and peak memory; for each closed-loop cell, CPU per response, p99 and peak memory over its window, and the file cell's throughput; each with a 95% bootstrap interval over the paired passes. An interval that contains 1.0 reads "no measurable change"; otherwise the result is the direction and the size. The A/A interval is printed beside them.
+- **Change lane:** for each capacity cell, the ratio of head to base for capacity, CPU per response and p99 at the highest step both held, and peak memory; for each closed-loop cell, CPU per response, p99 and peak memory over its window, and the file cell's throughput; for each proof cell, requests per second, CPU per response, p99 and peak memory, with that cell's own A/A interval beside them; each with a 95% bootstrap interval over the paired passes. An interval that contains 1.0 reads "no measurable change"; otherwise the result is the direction and the size. The A/A interval is printed beside them.
 - The rule above is fixed before any measured pass, and smoke runs never decide a result.
 
 ### Local runs
@@ -89,7 +102,7 @@ A smoke runs every cell with 100 slow clients and shortened steps.
 
 ### Budget
 
-A smoke may spend up to $2 and 30 minutes. A framework run (one dispatch: three passes in turn, each on a fresh instance pair) may spend up to $15 and 3 hours, and a change run up to $10 and 3.5 hours. A pair (two c8gn.4xlarge) costs about $1.90 an hour. Amended 2026-11-06 with cells 3 and 4, which add about 10 minutes to a pass: a change run was capped at 3 hours, and six passes now take about 3.
+A smoke may spend up to $2 and 30 minutes. A framework run (one dispatch: three passes in turn, each on a fresh instance pair) may spend up to $15 and 3 hours, and a change run up to $10 and 3.5 hours. A pair (two c8gn.4xlarge) costs about $1.90 an hour. Amended 2026-11-06 with cells 3 and 4, which add about 10 minutes to a pass: a change run was capped at 3 hours, and six passes now take about 3. Amended 2026-11-07 with cells 5 and 6: with two candidates a pass takes about 31 minutes, so six take about 3.2 hours, inside the 3.5.
 
 ## Consequences
 

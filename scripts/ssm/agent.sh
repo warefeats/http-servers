@@ -11,6 +11,10 @@ if [ -z "$(find /opt/bench/build/bin -type f)" ]; then
   exit 1
 fi
 find /opt/bench/build/bin -type f -exec chmod +x {} +
+# wrk, which the proof cells run against the server over loopback (docs/adr/0001, Cells), from Ubuntu's archive
+apt-get -o DPkg::Lock::Timeout=600 -qq update
+DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -qq -y install --no-install-recommends wrk >/dev/null
+echo "wrk: $(wrk -v 2>&1 | head -n 1 || true)"
 systemd-run --unit=bench-agent --service-type=exec --working-directory=/opt/bench \
   --setenv=HOME=/root --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   --property=LimitNOFILE=1048576 \

@@ -7,12 +7,18 @@
 import { readFileSync } from "node:fs";
 import { highestCommonHeld } from "./capacity";
 import { gbitPerS, type StepRecord, type WindowRecord } from "./measure";
-import type { BulkCell, SlowCell } from "./protocol";
+import type { BulkCell, ProofCell, SlowCell } from "./protocol";
 import type { CellRecord, RunFile } from "./run";
 import { bootstrapMedian, type Interval, median, tInterval, verdict } from "./stats";
+import { cpuCount } from "./wrk";
 
 const fmt = (n: number | null | undefined, digits = 0) => (n === null || n === undefined || !Number.isFinite(n) ? "–" : n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }));
 const ratio = (i: Interval) => (Number.isFinite(i.estimate) ? `${i.estimate.toFixed(3)} (${i.lo.toFixed(3)}–${i.hi.toFixed(3)})` : "–");
+
+/** A proof cell as the bot would have set it up: route, connections, wrk's CPUs and the send-buffer cap. */
+export function describeProof(c: ProofCell): string {
+  return `\`${c.route}\`, ${c.connections.toLocaleString("en-US")} connections, wrk on ${cpuCount(c.cpus)} CPUs${c.sndbuf === null ? "" : `, ${(c.sndbuf * 2) / 1024} KiB send buffer`}`;
+}
 
 interface Sample {
   key: string;
@@ -135,6 +141,22 @@ export function renderReport(runs: readonly RunFile[]): string {
     lines.push("");
   }
 
+  const proofCells = first.protocol.cells.filter((c): c is ProofCell => c.kind === "proof");
+  if (proofCells.length > 0) {
+    lines.push(`The Proof bot's harness, rebuilt on the server instance: ${first.host["wrk"] ?? "wrk"} over loopback against the server, closed loop, from CPUs the server doesn't use, ${first.protocol.proofWindowS} s recorded after ${first.protocol.proofWarmupS} s of warm-up. "wrk busy" is the share of its CPUs wrk used; near 100% the client sets the rate, not the server:`, "");
+    lines.push("| Cell | Server | Requests/s | p50 (ms) | p99 (ms) | Server CPU (µs/response) | wrk busy | Peak memory growth (MB) |", "| :-- | :-- | --: | --: | --: | --: | --: | --: |");
+    for (const cell of proofCells) {
+      let firstRow = true;
+      for (const arm of armIds) {
+        const ws = closedWindows(runs, cell.id, arm, (r) => r.proof);
+        if (ws.length === 0) continue;
+        lines.push(`| ${firstRow ? describeProof(cell) : ""} | ${label(arm)} | ${fmt(medianOf(ws, (x) => x.w.achievedRps))} | ${fmt(medianOf(ws, (x) => x.w.oha.p50Ms), 2)} | ${fmt(medianOf(ws, (x) => x.w.oha.p99Ms), 2)} | ${fmt(medianOf(ws, (x) => x.w.usPerResponse), 1)} | ${fmt(medianOf(ws, (x) => x.w.clientShare * 100))}% | ${fmt(medianOf(ws, (x) => x.g), 1)} |`);
+        firstRow = false;
+      }
+    }
+    lines.push("");
+  }
+
   if (first.lane === "change" && first.pair) {
     const { base, head } = first.pair;
     lines.push(`${label(head)} against ${label(base)}: ratio of head to base, median over paired passes with its 95% bootstrap interval. Higher is better for capacity and throughput, lower for the rest:`, "");
@@ -161,6 +183,16 @@ export function renderReport(runs: readonly RunFile[]): string {
       const mem = bootstrapMedian(pairedRatios(runs, cell.id, head, base, growth));
       lines.push(`| \`${cell.route}\` | ${ratio(thr)} | ${ratio(cpu)} | ${ratio(p99)} | ${ratio(mem)} | throughput ${verdict(thr, true)}; CPU ${verdict(cpu, false)}; p99 ${verdict(p99, false)}; memory ${verdict(mem, false)} |`);
     }
+    for (const cell of proofCells) {
+      const pick = (f: (w: WindowRecord) => number | null) => (h: CellRecord, b: CellRecord): [number | null, number | null] => [h.proof ? f(h.proof) : null, b.proof ? f(b.proof) : null];
+      const rps = bootstrapMedian(pairedRatios(runs, cell.id, head, base, pick((w) => w.achievedRps)));
+      const cpu = bootstrapMedian(pairedRatios(runs, cell.id, head, base, pick((w) => w.usPerResponse)));
+      const p99 = bootstrapMedian(pairedRatios(runs, cell.id, head, base, pick((w) => w.oha.p99Ms)));
+      const mem = bootstrapMedian(pairedRatios(runs, cell.id, head, base, growth));
+      const aaRps = bootstrapMedian(pairedRatios(runs, cell.id, `${base}#aa`, base, pick((w) => w.achievedRps)));
+      const aaCpu = bootstrapMedian(pairedRatios(runs, cell.id, `${base}#aa`, base, pick((w) => w.usPerResponse)));
+      lines.push(`| proof ${describeProof(cell)} | ${ratio(rps)} | ${ratio(cpu)} | ${ratio(p99)} | ${ratio(mem)} | requests/s ${verdict(rps, true)}; CPU ${verdict(cpu, false)}; p99 ${verdict(p99, false)}; memory ${verdict(mem, false)}; A/A requests/s ${ratio(aaRps)}, CPU ${ratio(aaCpu)} |`);
+    }
     const aa = bootstrapMedian(pairedRatios(runs, "json", `${base}#aa`, base, (h, b) => [capacityOf(h), capacityOf(b)]));
     const aaCpu = bootstrapMedian(pairedRatios(runs, "json", `${base}#aa`, base, atCommon((s) => s.window.usPerResponse)));
     if (aa.n > 0) lines.push(`| A/A \`/json\` | ${ratio(aa)} | ${ratio(aaCpu)} | – | – | the base against itself: the noise floor |`);
@@ -169,7 +201,7 @@ export function renderReport(runs: readonly RunFile[]): string {
 
   const failed = runs.flatMap((r) => r.cells.filter((c) => c.error));
   if (failed.length > 0) lines.push(`Failed cells: ${failed.map((c) => `pass ${c.pass} ${c.cell} ${c.arm}: ${c.error}`).join("; ")}`, "");
-  const other = runs.flatMap((r) => r.cells.flatMap((c) => [...(c.capacity?.steps.map((s) => s.window.otherCpus) ?? []), c.slow?.otherCpus ?? null])).filter((x): x is number => x !== null);
+  const other = runs.flatMap((r) => r.cells.flatMap((c) => [...(c.capacity?.steps.map((s) => s.window.otherCpus) ?? []), c.slow?.otherCpus ?? null, c.proof?.otherCpus ?? null])).filter((x): x is number => x !== null);
   const host = first.host;
   lines.push(`${passes} pass(es)${runs.length > 1 ? ` over ${runs.length} instance pairs` : ""}; within a cell the servers ran back to back in an order that rotated each pass, a fresh server process per cell; open-loop load from ${host["ohaProcesses"] ?? "one"} oha processes (${host["oha"] ?? "oha"}) with its latency correction, each percentile the highest any process saw, ${first.protocol.stepS} s recorded per step after ${first.protocol.warmupS} s of warm-up, and ${first.protocol.slowWindowS} s after ${first.protocol.slowWarmupS} s in the closed-loop cells; CPU is the server process's user plus system time. ${first.local ? `Local: server on CPUs ${host["serverCpus"]}, oha on ${host["clientCpus"]}, over loopback, on ${host["hostname"]} (${host["kernel"]}); other work on the host peaked at ${fmt(Math.max(0, ...other), 1)} CPUs during a recorded window.` : `Rig: ${host["hostname"] ?? ""}.`}`);
   return `${lines.join("\n")}\n`;

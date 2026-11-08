@@ -4,7 +4,10 @@
 use std::{convert::Infallible, io};
 
 use axum::{routing::get, Json, Router};
-use bench_common::{banner, file_path, fresh_323k, init, listener, page, B16K, B323K};
+use bench_common::{
+    banner, catalog, file_path, fresh_323k, init, listener, page, B16K, B323K, JSON_323K_ITEMS,
+    JSON_40K_ITEMS,
+};
 use tower_http::services::ServeFile;
 
 /// axum 0.8.9's `serve` resolves to `io::Result<()>`; its main branch's never returns.
@@ -34,6 +37,8 @@ async fn main() -> io::Result<()> {
     // The file goes through tower-http's `ServeFile`, the way axum's docs serve one.
     let app = Router::new()
         .route("/json", get(|| async { Json(page()) }))
+        .route("/json-40k", get(|| async { Json(catalog(JSON_40K_ITEMS)) }))
+        .route("/json-323k", get(|| async { Json(catalog(JSON_323K_ITEMS)) }))
         .route("/16k", get(|| async { B16K.clone() }))
         .route("/323k", get(|| async { B323K.clone() }))
         .route("/323k-fresh", get(|| async { fresh_323k() }))

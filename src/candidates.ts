@@ -42,6 +42,24 @@ export const CANDIDATES: readonly Candidate[] = [
     source: { kind: "git", repo: "https://github.com/johncarmack1984/actix-web", rev: "2a3f2019d2be1ecbd005916135c0b69a74cf2038" },
   },
   {
+    id: "actix-web-9fb5964",
+    framework: "actix-web",
+    label: "actix-web main 9fb5964",
+    source: { kind: "git", repo: "https://github.com/actix/actix-web", rev: "9fb59640aebc6a7c87bb79ead55b5730a5425ba4" },
+  },
+  {
+    id: "actix-web-pr4302-c2829f9",
+    framework: "actix-web",
+    label: "actix-web #4302 with fixes c2829f9",
+    source: { kind: "git", repo: "https://github.com/johncarmack1984/actix-web", rev: "c2829f952b05046f8db0daf16dc0b44e09c566b6" },
+  },
+  {
+    id: "actix-web-pr4302-2195876",
+    framework: "actix-web",
+    label: "actix-web #4302 with fixes 2195876",
+    source: { kind: "git", repo: "https://github.com/johncarmack1984/actix-web", rev: "21958769ebba90638142b8aaa33e504e9b6bc694" },
+  },
+  {
     id: "axum-40d061f",
     framework: "axum",
     label: "axum main 40d061f",
@@ -51,10 +69,12 @@ export const CANDIDATES: readonly Candidate[] = [
 
 export const LANES: Record<LaneId, Lane> = {
   frameworks: { id: "frameworks", candidates: ["actix-web-4.18.1", "axum-0.8.9"] },
+  // the second change run: #4302 with its fixes against the main it now merges into, axum left out to keep six
+  // passes inside the budget (ADR 0001, "Cells" and "Budget")
   change: {
     id: "change",
-    candidates: ["actix-web-81bb997", "actix-web-pr4302", "axum-40d061f"],
-    pair: { base: "actix-web-81bb997", head: "actix-web-pr4302" },
+    candidates: ["actix-web-9fb5964", "actix-web-pr4302-2195876"],
+    pair: { base: "actix-web-9fb5964", head: "actix-web-pr4302-2195876" },
   },
 };
 

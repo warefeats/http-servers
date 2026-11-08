@@ -5,9 +5,9 @@
  * so the two differ only in the framework's own crates; the build refuses the pair if anything else moved.
  *   bun run src/build.ts [--lane=change|frameworks] [--candidates=a,b] [--out=build]
  */
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { type Candidate, isLane, LANES, planCandidates, renderManifest, WORKSPACE_CRATES } from "./candidates";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
+import { type Candidate, isLane, isRust, LANES, planCandidates, renderManifest, WORKSPACE_CRATES } from "./candidates";
 import { arg } from "./cli";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -35,7 +35,9 @@ export function lockPackages(lockText: string): LockPackage[] {
 
 /** Every locked package outside the candidate's own framework crates, as `name version source`. */
 export function foreignPackages(packages: LockPackage[], c: Candidate): string[] {
-  const own = new Set([c.framework, ...WORKSPACE_CRATES[c.framework]]);
+  const framework = c.framework;
+  if (!isRust(framework)) throw new Error(`${c.id} has no Cargo.lock`);
+  const own = new Set<string>([framework, ...WORKSPACE_CRATES[framework]]);
   if (c.framework === "axum") own.add("axum-core");
   return packages
     .filter((p) => !(own.has(p.name) && (p.source === undefined || p.source.startsWith("git+") || p.source.startsWith("registry+"))))
@@ -79,7 +81,93 @@ export interface BuildRecord {
   versions: Record<string, string>;
 }
 
+/** The sha256 of every file under a directory, in path order: one hash for a server that is many files. */
+function treeSha256(dir: string): string {
+  const files: string[] = [];
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile()) files.push(p);
+    }
+  };
+  walk(dir);
+  const h = new Bun.CryptoHasher("sha256");
+  for (const f of files) h.update(`${relative(dir, f)}\0${sha256(f)}\n`);
+  return h.digest("hex");
+}
+
+/**
+ * The script the agent starts as `bin/<id>`: it runs the server from the files beside it, reading `ADDR`
+ * (host:port) and `STATIC_DIR` from the agent's environment. A runtime the rig installs under /opt/bench/runtimes
+ * comes first, then the one on PATH, so a local run uses the machine's own.
+ */
+export function launcher(c: Candidate): string {
+  const here = `"$(cd "$(dirname "$0")" && pwd)/${c.id}`;
+  const pick = (name: string, path: string) => `${name}=${path}; [ -x "$${name}" ] || ${name}=${name.toLowerCase()}`;
+  switch (c.framework) {
+    case "spring":
+      return `#!/bin/sh\n# Spring Boot's executable jar, as its docs run one\nexec java -jar ${here}.jar" --server.address="\${ADDR%:*}" --server.port="\${ADDR##*:}"\n`;
+    case "express":
+      return `#!/bin/sh\n${pick("NODE", "/opt/bench/runtimes/node/bin/node")}\nexec "$NODE" ${here}.d/server.js"\n`;
+    case "bun":
+      return `#!/bin/sh\n${pick("BUN", "/opt/bench/runtimes/bun/bun")}\nexec "$BUN" ${here}.d/cluster.ts"\n`;
+    case "apache":
+      return `#!/bin/sh\n${pick("APACHE2", "/usr/sbin/apache2")}\nexport APACHE_MODULES="\${APACHE_MODULES:-/usr/lib/apache2/modules}" APACHE_STATE="$(mktemp -d)"\nchmod 755 "$APACHE_STATE"\nexec "$APACHE2" -DFOREGROUND -f ${here}.d/httpd.conf"\n`;
+    case "nginx": {
+      return `#!/bin/sh\n${pick("NGINX", "/usr/sbin/nginx")}\nstate="$(mktemp -d)"\nchmod 755 "$state"\nsed -e "s#@ADDR@#$ADDR#" -e "s#@STATIC_DIR@#$STATIC_DIR#" -e "s#@STATE@#$state#" ${here}.d/nginx.conf.in" > "$state/nginx.conf"\nexec "$NGINX" -p "$state" -c "$state/nginx.conf" -g "daemon off;"\n`;
+    }
+    default:
+      throw new Error(`${c.id} is a Rust candidate, which builds a binary`);
+  }
+}
+
+/** A server outside Rust: its folder copied beside its launcher, and built where it builds. */
+function buildRelease(c: Candidate, out: string): BuildRecord {
+  const bin = join(out, "bin");
+  mkdirSync(bin, { recursive: true });
+  const src = join(ROOT, "servers", c.framework);
+  const dir = join(bin, `${c.id}.d`);
+  rmSync(dir, { recursive: true, force: true });
+  console.log(`== building ${c.id} (${c.label})`);
+  const started = performance.now();
+  const versions: Record<string, string> = {};
+  let artifact = dir;
+  if (c.framework === "spring") {
+    // Maven builds the executable jar in a copy of the project; only the jar ships
+    const project = join(out, c.id);
+    rmSync(project, { recursive: true, force: true });
+    cpSync(src, project, { recursive: true });
+    run(["./mvnw", "-B", "-q", "-DskipTests", "package"], project);
+    artifact = join(bin, `${c.id}.jar`);
+    copyFileSync(join(project, "target", "bench-spring.jar"), artifact);
+    versions["spring-boot"] = /<artifactId>spring-boot-starter-parent<\/artifactId>\s*<version>([^<]+)</.exec(readFileSync(join(src, "pom.xml"), "utf8"))?.[1] ?? "";
+    // java -version writes to stderr, after any "Picked up ..." notes about the environment
+    const java = Bun.spawnSync({ cmd: ["java", "-version"], stdout: "pipe", stderr: "pipe" });
+    versions["java (build)"] = `${java.stdout.toString()}${java.stderr.toString()}`.split("\n").find((l) => / version /.test(l))?.trim() ?? "";
+  } else {
+    cpSync(src, dir, { recursive: true });
+    if (c.framework === "express") {
+      run(["npm", "ci", "--omit=dev", "--no-audit", "--no-fund"], dir);
+      const lock: unknown = JSON.parse(readFileSync(join(dir, "package-lock.json"), "utf8"));
+      const pkgs = typeof lock === "object" && lock !== null && "packages" in lock && typeof lock.packages === "object" && lock.packages !== null ? new Map<string, unknown>(Object.entries(lock.packages)) : new Map<string, unknown>();
+      const express = pkgs.get("node_modules/express");
+      if (typeof express === "object" && express !== null && "version" in express && typeof express.version === "string") versions["express"] = express.version;
+    }
+  }
+  const launcherPath = join(bin, c.id);
+  writeFileSync(launcherPath, launcher(c));
+  chmodSync(launcherPath, 0o755);
+  const seconds = Math.round((performance.now() - started) / 100) / 10;
+  const digest = statSync(artifact).isDirectory() ? treeSha256(artifact) : sha256(artifact);
+  const bytes = statSync(artifact).isDirectory() ? 0 : statSync(artifact).size;
+  const record = { id: c.id, label: c.label, framework: c.framework, source: c.source, binary: launcherPath, sha256: digest, bytes, seconds, versions };
+  console.log(`   ${c.id}: ${digest.slice(0, 16)} in ${seconds}s; ${Object.entries(versions).map(([k, v]) => `${k}=${v}`).join(" ")}`);
+  return record;
+}
+
 function build(c: Candidate, out: string, seedLock?: string): BuildRecord {
+  if (!isRust(c.framework)) return buildRelease(c, out);
   const project = join(out, c.id);
   rmSync(project, { recursive: true, force: true });
   mkdirSync(project, { recursive: true });

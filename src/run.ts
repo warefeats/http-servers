@@ -7,7 +7,7 @@
  */
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { type Candidate, isLane, LANES, type LaneId, planCandidates } from "./candidates";
+import { type Candidate, isLane, LANES, type LaneId, planCandidates, serves } from "./candidates";
 import { arg, numberArg } from "./cli";
 import { AgentClient, bulkCell, type CellResult, capacityCell, type Env, proofCell, slowCell } from "./measure";
 import { hostTicks, HZ, resolveNic } from "./proc";
@@ -42,8 +42,9 @@ export interface RunFile {
 }
 
 /** Arms for one cell in one pass: the candidates rotated by the pass, plus the change lane's A/A arm where the cell has one. */
-export function arms(candidates: readonly Candidate[], pass: number, cell: Pick<Cell, "id" | "kind">, aaBase: string | null): string[] {
-  const ids = candidates.map((c) => c.id);
+export function arms(candidates: readonly Candidate[], pass: number, cell: Pick<Cell, "id" | "kind" | "route">, aaBase: string | null): string[] {
+  // a static web server sits out the routes it doesn't serve
+  const ids = candidates.filter((c) => serves(c, cell.route)).map((c) => c.id);
   if (aaBase && hasAaArm(cell)) ids.push(`${aaBase}#aa`);
   const k = (pass - 1) % ids.length;
   return [...ids.slice(k), ...ids.slice(0, k)];
@@ -74,23 +75,28 @@ async function sha256(buf: ArrayBuffer): Promise<string> {
 }
 
 /**
- * Every route the cells use, in every candidate: status, framing and the body's hash, which must match across
- * candidates, and a bulk cell's size, which must be the size the cell expects.
+ * Every route the cells use, in every candidate that serves it: a 200 and the body's hash, which must match across
+ * candidates, and a bulk cell's size, which must be the size the cell expects. Framing and content type are kept
+ * as each server sends them: Express and Spring send JSON with their own content type, and a framework that streams
+ * its JSON frames it chunked.
  */
 async function preflight(env: Env, candidates: readonly Candidate[], cells: readonly Cell[]): Promise<Record<string, Record<string, string>>> {
   const routes = [...new Set(cells.map((c) => c.route))];
   const out: Record<string, Record<string, string>> = {};
+  const hashes: Record<string, Map<string, string>> = {};
   for (const c of candidates) {
     await env.agent.start(c.id);
     try {
       const answers: Record<string, string> = {};
       out[c.id] = answers;
-      for (const route of routes) {
+      for (const route of routes.filter((r) => serves(c, r))) {
         const r = await fetch(`${env.target}${route}`, { headers: { "accept-encoding": "identity" } });
         const body = await r.arrayBuffer();
         const framing = r.headers.get("transfer-encoding") ? `chunked` : `length ${r.headers.get("content-length")}`;
-        const line = `${r.status} ${framing} ${r.headers.get("content-type")} ${await sha256(body)}`;
+        const hash = await sha256(body);
+        const line = `${r.status} ${framing} ${r.headers.get("content-type")} ${hash}`;
         answers[route] = line;
+        (hashes[route] ??= new Map()).set(c.id, `${r.status} ${hash}`);
         if (r.status !== 200) throw new Error(`${c.id} ${route}: ${line}`);
         for (const cell of cells) {
           if (cell.kind === "bulk" && cell.route === route && body.byteLength !== cell.bytes) throw new Error(`${c.id} ${route}: ${body.byteLength} bytes where the ${cell.id} cell expects ${cell.bytes}`);
@@ -100,12 +106,11 @@ async function preflight(env: Env, candidates: readonly Candidate[], cells: read
       await env.agent.stop();
     }
   }
-  const first = candidates[0];
-  for (const c of candidates) {
-    for (const route of routes) {
-      const a = first ? out[first.id]?.[route] : undefined;
-      const b = out[c.id]?.[route];
-      if (a !== b) throw new Error(`preflight: ${c.id} ${route} answers "${b}" where ${first?.id} answers "${a}"`);
+  for (const route of routes) {
+    const seen = [...(hashes[route] ?? new Map<string, string>()).entries()];
+    const [firstId, firstBody] = seen[0] ?? ["", ""];
+    for (const [id, body] of seen) {
+      if (body !== firstBody) throw new Error(`preflight: ${id} ${route} answers "${out[id]?.[route]}" where ${firstId} answers "${out[firstId]?.[route]}"`);
     }
   }
   return out;
@@ -182,14 +187,14 @@ async function main(): Promise<void> {
       pair,
       candidates: candidates.map((c) => ({ id: c.id, label: c.label })),
       protocol: p,
-      host: { hostname: (await Bun.$`hostname`.text()).trim(), kernel: (await Bun.$`uname -r`.text()).trim(), cpus: String(navigator.hardwareConcurrency), oha: (await Bun.$`oha --version`.text()).trim(), ohaProcesses: String(generators), clientPorts: (await Bun.file("/proc/sys/net/ipv4/ip_local_port_range").text()).trim().replace(/\s+/g, "-"), clientTwReuse: (await Bun.file("/proc/sys/net/ipv4/tcp_tw_reuse").text()).trim(), clientCpus: clientCpus ?? "all", serverCpus: (await env.agent.serverCpus()) ?? "all", wrk: (await env.agent.wrkVersion()) ?? "none" },
+      host: { hostname: (await Bun.$`hostname`.text()).trim(), kernel: (await Bun.$`uname -r`.text()).trim(), cpus: String(navigator.hardwareConcurrency), oha: (await Bun.$`oha --version`.text()).trim(), ohaProcesses: String(generators), clientPorts: (await Bun.file("/proc/sys/net/ipv4/ip_local_port_range").text()).trim().replace(/\s+/g, "-"), clientTwReuse: (await Bun.file("/proc/sys/net/ipv4/tcp_tw_reuse").text()).trim(), clientCpus: clientCpus ?? "all", serverCpus: (await env.agent.serverCpus()) ?? "all", wrk: (await env.agent.wrkVersion()) ?? "none", ...Object.fromEntries(Object.entries(await env.agent.runtimes()).map(([k, v]) => [`runtime ${k}`, v])) },
       preflight: {},
       startedAt: new Date().toISOString(),
       cells: [],
     };
     console.log(`== ${lane.id} ${modeArg}${local ? " (local)" : ""}: ${candidates.map((c) => c.label).join(", ")}; ${p.passes} pass(es) from pass ${firstPass}; cells ${p.cells.map((c) => c.id).join(", ")}; results ${file}`);
     run.preflight = await preflight(env, candidates, p.cells);
-    console.log("== preflight: every route answers the same status, framing and bytes in every candidate");
+    console.log("== preflight: every route answers a 200 with the same bytes in every candidate that serves it");
     save(file, run);
     for (let pass = firstPass; pass < firstPass + p.passes; pass++) {
       for (const cell of p.cells) {

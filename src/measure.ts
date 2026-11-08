@@ -82,6 +82,12 @@ export class AgentClient {
     const r = await this.call("GET", "/health");
     return typeof r["cpus"] === "string" ? r["cpus"] : null;
   }
+  /** The runtimes the agent's host has for the servers outside Rust, by name. */
+  async runtimes(): Promise<Record<string, string>> {
+    const r = await this.call("GET", "/health");
+    const v = r["runtimes"];
+    return isJson(v) ? Object.fromEntries(Object.entries(v).flatMap(([k, x]) => (typeof x === "string" ? [[k, x] as const] : []))) : {};
+  }
   /** The version of the wrk the agent runs for the proof cells, or null when it has none. */
   async wrkVersion(): Promise<string | null> {
     const r = await this.call("GET", "/health");

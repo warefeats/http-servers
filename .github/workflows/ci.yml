@@ -21,5 +21,13 @@ jobs:
         with:
           bun-version: "1.4.0"
       - run: rustup toolchain install stable --profile minimal && rustup default stable
+      # Spring Boot's Maven build needs Java 25, and Express's npm install the Node.js the rig runs it on
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26.13.0"
       - run: bun install --frozen-lockfile
       - run: bun run src/build.ts --lane=frameworks

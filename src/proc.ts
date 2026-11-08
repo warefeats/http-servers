@@ -1,5 +1,5 @@
 /** Readers for /proc and the NIC's counters, shared by the agent and the local runner. */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 /** USER_HZ on Linux. */
 export const HZ = 100;
@@ -33,6 +33,62 @@ export function processMemory(pid: number): Memory | null {
   } catch {
     return null;
   }
+}
+
+/** The fields of /proc/<pid>/stat after the command name, which may hold spaces and parentheses. */
+export function statFields(stat: string): string[] {
+  return stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+}
+
+/** The pids in a process group: a server's leader and every worker it started, threads counted within each. */
+export function groupPids(pgid: number): number[] {
+  const out: number[] = [];
+  for (const name of readdirSync("/proc")) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      // field 5 of stat, the process group, is index 2 after the command name
+      if (Number(statFields(readFileSync(`/proc/${name}/stat`, "utf8"))[2]) === pgid) out.push(Number(name));
+    } catch {
+      // gone between the listing and the read
+    }
+  }
+  return out;
+}
+
+/**
+ * A process group's CPU time in clock ticks: every live member's user plus system time, plus the time of the
+ * children each has reaped, so a worker that exited and was waited for still counts. Null when the group is gone.
+ */
+export function groupTicks(pgid: number): number | null {
+  let total = 0;
+  let any = false;
+  for (const pid of groupPids(pgid)) {
+    try {
+      const f = statFields(readFileSync(`/proc/${pid}/stat`, "utf8"));
+      const t = Number(f[11]) + Number(f[12]) + Number(f[13]) + Number(f[14]);
+      if (Number.isFinite(t)) {
+        total += t;
+        any = true;
+      }
+    } catch {
+      // gone
+    }
+  }
+  return any ? total : null;
+}
+
+/**
+ * A process group's memory: the sum over its members of resident set and peak resident set, and their threads. For
+ * one process it is that process's own; for several, the peak is the sum of each one's peak.
+ */
+export function groupMemory(pgid: number): Memory | null {
+  let m: Memory | null = null;
+  for (const pid of groupPids(pgid)) {
+    const one = processMemory(pid);
+    if (!one) continue;
+    m = m === null ? { ...one } : { rssKb: m.rssKb + one.rssKb, hwmKb: m.hwmKb + one.hwmKb, threads: m.threads + one.threads };
+  }
+  return m;
 }
 
 export interface HostTicks {

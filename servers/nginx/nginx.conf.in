@@ -1,0 +1,32 @@
+# nginx bench server (docs/adr/0001-what-the-benchmark-answers.md, "The servers"): nginx.org's stable package for
+# Ubuntu 24.04 with the values of its packaged nginx.conf, serving the agent's static files. It serves /16k, /323k
+# and /file only: it builds no body per request. The launcher fills @ADDR@, @STATIC_DIR@ and @STATE@.
+
+user nginx;
+worker_processes auto;
+pid @STATE@/nginx.pid;
+error_log stderr warn;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    default_type application/octet-stream;
+    sendfile on;
+    keepalive_timeout 65;
+    # no access log, as no other server writes one
+    access_log off;
+    # temp files under the launcher's state directory, whatever path the build was configured with
+    client_body_temp_path @STATE@/client_body;
+    proxy_temp_path @STATE@/proxy;
+    fastcgi_temp_path @STATE@/fastcgi;
+    uwsgi_temp_path @STATE@/uwsgi;
+    scgi_temp_path @STATE@/scgi;
+
+    server {
+        # the one equalization: actix-web's listen backlog of 1,024 (nginx's own default on Linux is 511)
+        listen @ADDR@ backlog=1024;
+        root @STATIC_DIR@;
+    }
+}

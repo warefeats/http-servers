@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loopbackRequest, shapeCommand, startRequest } from "../src/agent";
+import { loopbackRequest, shapeCommand, STATIC_FILES, startRequest, writeStaticFiles } from "../src/agent";
+import { launcher } from "../src/build";
 import { foreignPackages, lockPackages, pairDrift } from "../src/build";
-import { candidate, CANDIDATES, LANES, manifestParts, planCandidates, renderManifest } from "../src/candidates";
+import { candidate, CANDIDATES, isRust, LANES, manifestParts, planCandidates, renderManifest, serves, STATIC_ROUTES } from "../src/candidates";
 import { findCapacity, held, highestCommonHeld, type StepOutcome } from "../src/capacity";
 import { arg } from "../src/cli";
 import { errorRate, gbitPerS, generatorShortfall, netemCommand, parsePass, parseStats } from "../src/measure";
 import { mergePasses, ohaArgs, parseOha, shares } from "../src/oha";
-import { hostTicks, parseEthtool } from "../src/proc";
+import { groupMemory, groupPids, groupTicks, hostTicks, parseEthtool } from "../src/proc";
 import { connectionsFor, hasAaArm, protocol } from "../src/protocol";
 import { rank } from "../src/publish";
 import { arms } from "../src/run";
@@ -41,7 +43,7 @@ describe("candidates", () => {
   });
 
   test("the templates render to manifests with no marker left, prose untouched", () => {
-    for (const c of CANDIDATES) {
+    for (const c of CANDIDATES.filter((x) => isRust(x.framework))) {
       const text = renderManifest(readFileSync(join(ROOT, "servers", c.framework, "Cargo.toml.in"), "utf8"), c, "/repo/servers/common");
       expect(text).not.toMatch(/^@\w+@$/m);
       expect(text).toContain('bench-common = { path = "/repo/servers/common" }');
@@ -67,6 +69,48 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "bench-actix-web"
 version = "0.0.0"
 ${extra}`;
+
+describe("servers outside Rust", () => {
+  test("a release candidate has no Cargo manifest", () => {
+    expect(() => manifestParts(candidate("express-5.3.0"))).toThrow("no Cargo manifest");
+  });
+
+  test("each launcher runs its server from the files beside it, with the rig's runtime first", () => {
+    expect(launcher(candidate("spring-boot-4.1.2"))).toContain('exec java -jar "$(cd "$(dirname "$0")" && pwd)/spring-boot-4.1.2.jar" --server.address="${ADDR%:*}" --server.port="${ADDR##*:}"');
+    expect(launcher(candidate("express-5.3.0"))).toContain('NODE=/opt/bench/runtimes/node/bin/node; [ -x "$NODE" ] || NODE=node\nexec "$NODE" "$(cd "$(dirname "$0")" && pwd)/express-5.3.0.d/server.js"');
+    expect(launcher(candidate("bun-1.4.4"))).toContain('exec "$BUN" "$(cd "$(dirname "$0")" && pwd)/bun-1.4.4.d/cluster.ts"');
+    expect(launcher(candidate("apache-2.4"))).toContain('exec "$APACHE2" -DFOREGROUND -f "$(cd "$(dirname "$0")" && pwd)/apache-2.4.d/httpd.conf"');
+    expect(launcher(candidate("nginx-1.30.6"))).toContain('exec "$NGINX" -p "$state" -c "$state/nginx.conf" -g "daemon off;"');
+    for (const id of ["spring-boot-4.1.2", "express-5.3.0", "bun-1.4.4", "apache-2.4", "nginx-1.30.6"]) expect(launcher(candidate(id)).startsWith("#!/bin/sh\n")).toBe(true);
+    expect(() => launcher(candidate("axum-0.8.9"))).toThrow("Rust");
+  });
+
+  test("the static files hold the bytes every server sends", () => {
+    const dir = mkdtempSync(join(tmpdir(), "static-"));
+    try {
+      writeStaticFiles(dir);
+      for (const f of STATIC_FILES) expect(statSync(join(dir, f.name)).size).toBe(f.bytes);
+      const b = readFileSync(join(dir, "323k"));
+      expect([b[0], b[250], b[251], b[322_999]]).toEqual([0, 250, 0, 322_999 % 251]);
+      const big = readFileSync(join(dir, "file"));
+      expect([big[1_048_575], big[67_108_863]]).toEqual([1_048_575 % 251, 67_108_863 % 251]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a server's process group counts its workers, and one kill stops them all", async () => {
+    const p = Bun.spawn({ cmd: ["setsid", "sh", "-c", "sleep 30 & sleep 30 & wait"], stdout: "ignore" });
+    await Bun.sleep(200);
+    expect(groupPids(p.pid).length).toBe(3);
+    expect(groupTicks(p.pid)).not.toBeNull();
+    expect(groupMemory(p.pid)?.threads).toBe(3);
+    process.kill(-p.pid, "SIGKILL");
+    await p.exited;
+    await Bun.sleep(100);
+    expect(groupPids(p.pid)).toEqual([]);
+  });
+});
 
 describe("build", () => {
   test("a pair that differs only in the framework's crates has no drift", () => {
@@ -304,11 +348,11 @@ describe("run", () => {
   test("arms rotate each pass and the change lane adds its A/A arm on json and the proof cells only", () => {
     const base = "actix-web-9fb5964";
     const head = "actix-web-pr4302-2195876";
-    expect(arms(cs, 1, { id: "json", kind: "capacity" }, base)).toEqual([base, head, `${base}#aa`]);
-    expect(arms(cs, 2, { id: "json", kind: "capacity" }, base)).toEqual([head, `${base}#aa`, base]);
-    expect(arms(cs, 2, { id: "16k", kind: "capacity" }, base)).toEqual([head, base]);
-    expect(arms(cs, 3, { id: "proof-323k", kind: "proof" }, base)).toEqual([`${base}#aa`, base, head]);
-    expect(arms(cs, 1, { id: "proof-323k", kind: "proof" }, null)).toEqual([base, head]);
+    expect(arms(cs, 1, { id: "json", kind: "capacity", route: "/json" }, base)).toEqual([base, head, `${base}#aa`]);
+    expect(arms(cs, 2, { id: "json", kind: "capacity", route: "/json" }, base)).toEqual([head, `${base}#aa`, base]);
+    expect(arms(cs, 2, { id: "16k", kind: "capacity", route: "/16k" }, base)).toEqual([head, base]);
+    expect(arms(cs, 3, { id: "proof-323k", kind: "proof", route: "/323k" }, base)).toEqual([`${base}#aa`, base, head]);
+    expect(arms(cs, 1, { id: "proof-323k", kind: "proof", route: "/323k" }, null)).toEqual([base, head]);
     expect(protocol("change", "full", false).cells.filter(hasAaArm).map((c) => c.id)).toEqual(["json", "proof-323k", "proof-323k-wide", "proof-323k-capped", "proof-323k-1000", "proof-323k-fresh-capped", "proof-json-323k-capped", "proof-json-40k"]);
   });
 
@@ -354,6 +398,21 @@ describe("run", () => {
     expect(rank({ "actix-web": [24.0, 23.5, 24.4], axum: [2.7, 2.9, 2.6] }, true)).toBe("axum");
     // one pass, as a smoke has, ranks nothing
     expect(rank({ "actix-web": [512_000], axum: [256_000] }, false)).toBe("");
+  });
+
+  test("a static web server runs only the cells of the routes it serves", () => {
+    const fw = LANES.frameworks.candidates.map(candidate);
+    const statics = fw.filter((c) => c.routes).map((c) => c.id);
+    expect(statics).toEqual(["apache-2.4", "nginx-1.30.6"]);
+    expect(arms(fw, 1, { id: "json-40k", kind: "capacity", route: "/json-40k" }, null).some((a) => statics.includes(a))).toBe(false);
+    expect(arms(fw, 1, { id: "323k-fresh", kind: "capacity", route: "/323k-fresh" }, null).some((a) => statics.includes(a))).toBe(false);
+    for (const cell of ["323k", "slow-323k", "file", "16k"] as const) {
+      const c = protocol("frameworks", "full", false).cells.find((x) => x.id === cell);
+      if (!c) throw new Error(cell);
+      expect(arms(fw, 1, c, null)).toHaveLength(7);
+    }
+    expect(serves({ routes: STATIC_ROUTES }, "/file")).toBe(true);
+    expect(serves({}, "/json")).toBe(true);
   });
 
   test("cli arguments", () => {

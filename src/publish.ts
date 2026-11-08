@@ -6,6 +6,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { candidate, type Framework } from "./candidates";
 import { arg } from "./cli";
 import type { StepRecord, WindowRecord } from "./measure";
 import type { Cell } from "./protocol";
@@ -47,9 +48,14 @@ interface SiteSection {
 }
 
 /** How each framework shows on the site: its name, logo and color, and the version its candidate pins. */
-const FRAMEWORKS: Record<string, Omit<SiteCandidate, "id" | "version" | "statistics" | "samplesMs">> = {
+const FRAMEWORKS: Record<Framework, Omit<SiteCandidate, "id" | "version" | "statistics" | "samplesMs">> = {
   "actix-web": { name: "actix-web", homepage: "https://actix.rs" },
   axum: { name: "axum", homepage: "https://github.com/tokio-rs/axum" },
+  spring: { name: "Spring Boot", homepage: "https://spring.io/projects/spring-boot" },
+  express: { name: "Express", homepage: "https://expressjs.com" },
+  bun: { name: "Bun", homepage: "https://bun.sh" },
+  apache: { name: "Apache httpd", homepage: "https://httpd.apache.org" },
+  nginx: { name: "nginx", homepage: "https://nginx.org" },
 };
 
 /** What each published cell's section says it measured; the proof cells are the change lane's alone. */
@@ -165,7 +171,7 @@ export function sections(runs: readonly RunFile[], versions: Record<string, stri
     const candidates = first.candidates.map((c): SiteCandidate => {
       const recs = recsFor(c.id);
       const samples = recs.map(m.value).filter((x): x is number => x !== null && Number.isFinite(x)).map((x) => round(x, 2));
-      const framework = c.id.startsWith("axum") ? "axum" : "actix-web";
+      const framework = candidate(c.id).framework;
       const look = FRAMEWORKS[framework];
       if (!look) throw new Error(`no site entry for ${framework}`);
       return { id: framework, ...look, version: versions[c.id] ?? c.label.replace(/^\S+\s+/, ""), statistics: statistics(samples), samplesMs: samples, metrics: m.metrics(recs) };
@@ -198,9 +204,16 @@ if (import.meta.main) {
     for (const c of record.candidates) {
       if (typeof c !== "object" || c === null || !("id" in c) || !("versions" in c) || typeof c.id !== "string" || typeof c.versions !== "object" || c.versions === null) continue;
       const v = new Map<string, unknown>(Object.entries(c.versions));
-      const own = c.id.startsWith("axum") ? v.get("axum") : v.get("actix-web");
-      const http = c.id.startsWith("axum") ? v.get("hyper") : v.get("actix-http");
-      if (typeof own === "string") versions[c.id] = typeof http === "string" ? `${own} (${c.id.startsWith("axum") ? "hyper" : "actix-http"} ${http})` : own;
+      const framework = candidate(c.id).framework;
+      if (framework === "actix-web" || framework === "axum") {
+        const own = v.get(framework);
+        const httpName = framework === "axum" ? "hyper" : "actix-http";
+        const http = v.get(httpName);
+        if (typeof own === "string") versions[c.id] = typeof http === "string" ? `${own} (${httpName} ${http})` : own;
+      } else {
+        const src = candidate(c.id).source;
+        if (src.kind === "release") versions[c.id] = `${src.version} (${src.runtime})`;
+      }
     }
   }
   const id = arg("id") ?? `${new Date().toISOString().slice(0, 10)}-aws-graviton4`;

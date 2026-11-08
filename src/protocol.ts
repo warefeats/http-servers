@@ -91,8 +91,10 @@ export function hasAaArm(cell: Pick<Cell, "id" | "kind">): boolean {
 
 export function cells(mode: "smoke" | "full", local: boolean): Cell[] {
   const bisections = mode === "smoke" ? 1 : 3;
-  // the rig's 4-vCPU server and the 8 local CPUs start near where earlier runs held, to spend steps near capacity
-  const start = local ? { json: 16_000, json40k: 4_000, json323k: 500, b16k: 8_000, b323k: 2_000 } : { json: 32_000, json40k: 4_000, json323k: 500, b16k: 16_000, b323k: 500 };
+  // the rig's 4-vCPU server and the 8 local CPUs start near where earlier runs held, to spend steps near capacity,
+  // except /json: every server ramps up to it from 4,000, since a JIT server's cold first step at 32,000 failed a
+  // rate it holds once warm, and a search never goes back above its first failed rate (ADR 0001, Measurement)
+  const start = local ? { json: 4_000, json40k: 4_000, json323k: 500, b16k: 8_000, b323k: 2_000 } : { json: 4_000, json40k: 4_000, json323k: 500, b16k: 16_000, b323k: 500 };
   const slow = { connections: mode === "smoke" ? 100 : 1_000, flowRateMbit: 10, rttMs: 40, localSndbuf: 65_536 };
   // the bot's wrk: 4 threads on 4 CPUs, 256 connections; the server keeps cores 0-3
   const proof = { connections: 256, threads: 4, cpus: "4-7", sndbuf: null };

@@ -10,6 +10,7 @@ import { errorRate, gbitPerS, generatorShortfall, netemCommand, parsePass, parse
 import { mergePasses, ohaArgs, parseOha, shares } from "../src/oha";
 import { hostTicks, parseEthtool } from "../src/proc";
 import { connectionsFor, hasAaArm, protocol } from "../src/protocol";
+import { rank } from "../src/publish";
 import { arms } from "../src/run";
 import { bootstrapMedian, median, overlaps, tInterval, verdict } from "../src/stats";
 import { cpuCount, firstCpus, parseWrk, wrkArgs, wrkDuration } from "../src/wrk";
@@ -345,6 +346,14 @@ describe("run", () => {
   test("the file cell downloads 64 MiB, and its throughput counts completed responses", () => {
     expect(protocol("change", "full", false).cells.find((c) => c.kind === "bulk")).toMatchObject({ route: "/file", bytes: 67_108_864, connections: 64 });
     expect(gbitPerS({ achievedRps: 93.13225746154785 }, 67_108_864)).toBeCloseTo(50, 6);
+  });
+
+  test("the site ranks a cell only when the passes' 95% intervals part", () => {
+    expect(rank({ "actix-web": [512_000, 480_000, 512_000], axum: [256_000, 256_000, 240_000] }, false)).toBe("actix-web");
+    expect(rank({ "actix-web": [16_000, 18_000, 16_000], axum: [16_000, 16_000, 18_000] }, false)).toBe("");
+    expect(rank({ "actix-web": [24.0, 23.5, 24.4], axum: [2.7, 2.9, 2.6] }, true)).toBe("axum");
+    // one pass, as a smoke has, ranks nothing
+    expect(rank({ "actix-web": [512_000], axum: [256_000] }, false)).toBe("");
   });
 
   test("cli arguments", () => {

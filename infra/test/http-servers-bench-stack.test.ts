@@ -5,6 +5,7 @@ import { Match } from "aws-cdk-lib/assertions";
 import {
   BUN_VERSION,
   CLIENT_TYPE,
+  CURL,
   OHA_SHA256,
   OHA_VERSION,
   READY_MARKER,
@@ -116,7 +117,12 @@ describe("HttpServersBenchStack", () => {
     expect(text).toContain("while fuser /var/lib/dpkg/lock-frontend");
     expect(text).toContain("install -y curl git unzip jq iproute2 ethtool build-essential pkg-config");
     expect(text).toContain("awscli-exe-linux-$(uname -m).zip");
-    expect(text).toContain(`curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}"`);
+    expect(text).toContain(`https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-aarch64.zip`);
+    expect(text).toContain(`grep " bun-linux-aarch64.zip$" | (cd /tmp && sha256sum -c -)`);
+    expect(text).toContain("install -m 755 /tmp/bun-linux-aarch64/bun /usr/local/bin/bun");
+    expect(text).not.toContain("bun.sh/install");
+    // GitHub's release redirects answer 504 in bursts, so no download goes without retries
+    expect(l.filter((x) => /\bcurl\b/.test(x) && !x.includes("apt-get") && !x.includes("install -y")).every((x) => x.includes(CURL))).toBe(true);
     expect(text).not.toContain("git clone");
   });
 

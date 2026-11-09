@@ -49,6 +49,7 @@ export interface Lane {
 export const CANDIDATES: readonly Candidate[] = [
   { id: "actix-web-4.18.1", framework: "actix-web", label: "actix-web 4.18.1", source: { kind: "crates", version: "4.18.1" } },
   { id: "actix-web-4.18.2", framework: "actix-web", label: "actix-web 4.18.2", source: { kind: "crates", version: "4.18.2" } },
+  { id: "actix-web-4.19.0", framework: "actix-web", label: "actix-web 4.19.0", source: { kind: "crates", version: "4.19.0" } },
   { id: "axum-0.8.9", framework: "axum", label: "axum 0.8.9", source: { kind: "crates", version: "0.8.9" } },
   {
     id: "actix-web-81bb997",
@@ -94,7 +95,7 @@ export const CANDIDATES: readonly Candidate[] = [
 ];
 
 export const LANES: Record<LaneId, Lane> = {
-  frameworks: { id: "frameworks", candidates: ["actix-web-4.18.2", "axum-0.8.9", "spring-boot-4.1.2", "express-5.3.0", "bun-1.4.4", "apache-2.4", "nginx-1.30.6"] },
+  frameworks: { id: "frameworks", candidates: ["actix-web-4.19.0", "axum-0.8.9", "spring-boot-4.1.2", "express-5.3.0", "bun-1.4.4", "apache-2.4", "nginx-1.30.6"] },
   // the second change run: #4302 with its fixes against the main it now merges into, axum left out to keep six
   // passes inside the budget (ADR 0001, "Cells" and "Budget")
   change: {

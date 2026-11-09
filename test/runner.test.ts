@@ -11,9 +11,9 @@ import { arg } from "../src/cli";
 import { errorRate, gbitPerS, generatorShortfall, netemCommand, parsePass, parseStats } from "../src/measure";
 import { mergePasses, ohaArgs, parseOha, shares } from "../src/oha";
 import { groupMemory, groupPids, groupTicks, hostTicks, parseEthtool } from "../src/proc";
-import { connectionsFor, hasAaArm, protocol } from "../src/protocol";
-import { rank } from "../src/publish";
-import { arms } from "../src/run";
+import { type Cell, connectionsFor, hasAaArm, protocol } from "../src/protocol";
+import { rank, sections } from "../src/publish";
+import { arms, type CellRecord, type RunFile } from "../src/run";
 import { bootstrapMedian, median, overlaps, tInterval, verdict } from "../src/stats";
 import { cpuCount, firstCpus, parseWrk, wrkArgs, wrkDuration } from "../src/wrk";
 
@@ -398,6 +398,44 @@ describe("run", () => {
     expect(rank({ "actix-web": [24.0, 23.5, 24.4], axum: [2.7, 2.9, 2.6] }, true)).toBe("axum");
     // one pass, as a smoke has, ranks nothing
     expect(rank({ "actix-web": [512_000], axum: [256_000] }, false)).toBe("");
+  });
+
+  test("publish: a static-only server sits out the routes it doesn't serve, and those routes are still ranked", () => {
+    const rec = (pass: number, cell: Cell["id"], id: string, rps: number): CellRecord => ({
+      banner: id,
+      startRssKb: null,
+      peakGrowthMb: null,
+      capacity: { capacityRps: rps, atCeiling: false, steps: [], floor: false },
+      pass,
+      cell,
+      arm: id,
+      candidate: id,
+      startedAt: "2026-11-09T00:00:00Z",
+    });
+    const ids = ["actix-web-4.19.0", "bun-1.4.4", "apache-2.4"];
+    const runs: RunFile[] = [1, 2, 3].map((pass) => ({
+      schema: 1,
+      lane: "frameworks",
+      mode: "full",
+      local: false,
+      candidates: ids.map((id) => ({ id, label: id })),
+      protocol: protocol("frameworks", "full", false),
+      host: {},
+      preflight: {},
+      startedAt: "2026-11-09T00:00:00Z",
+      cells: [
+        rec(pass, "json", "actix-web-4.19.0", 480_000),
+        rec(pass, "json", "bun-1.4.4", 320_000),
+        rec(pass, "16k", "actix-web-4.19.0", 352_000),
+        rec(pass, "16k", "bun-1.4.4", 256_000),
+        rec(pass, "16k", "apache-2.4", 48_000),
+      ],
+    }));
+    const out = sections(runs, {});
+    const json = out.find((s) => s.id === "json");
+    expect(json?.candidates.map((c) => c.id)).toEqual(["actix-web", "bun"]);
+    expect(json?.verdict.winnerId).toBe("actix-web");
+    expect(out.find((s) => s.id === "16k")?.candidates.map((c) => c.id)).toEqual(["actix-web", "bun", "apache"]);
   });
 
   test("a static web server runs only the cells of the routes it serves", () => {

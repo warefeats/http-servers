@@ -6,7 +6,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { candidate, type Framework } from "./candidates";
+import { candidate, type Framework, serves } from "./candidates";
 import { arg } from "./cli";
 import type { StepRecord, WindowRecord } from "./measure";
 import type { Cell } from "./protocol";
@@ -159,7 +159,7 @@ function measureFor(cell: Cell): Measure | null {
   return null;
 }
 
-/** One section per cell of the lane, its candidates in the run's order. */
+/** One section per cell of the lane, with the candidates that serve its route, in the run's order. */
 export function sections(runs: readonly RunFile[], versions: Record<string, string>): SiteSection[] {
   const first = runs[0];
   if (!first) throw new Error("no runs");
@@ -168,7 +168,7 @@ export function sections(runs: readonly RunFile[], versions: Record<string, stri
     const text = SECTIONS[cell.id];
     if (!m || !text) return [];
     const recsFor = (id: string) => runs.flatMap((run) => run.cells.filter((c) => c.cell === cell.id && c.arm === id && !c.error));
-    const candidates = first.candidates.map((c): SiteCandidate => {
+    const candidates = first.candidates.filter((c) => serves(candidate(c.id), cell.route)).map((c): SiteCandidate => {
       const recs = recsFor(c.id);
       const samples = recs.map(m.value).filter((x): x is number => x !== null && Number.isFinite(x)).map((x) => round(x, 2));
       const framework = candidate(c.id).framework;

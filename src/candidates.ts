@@ -5,7 +5,7 @@
  */
 import type { Route } from "./protocol";
 
-export type RustFramework = "actix-web" | "axum";
+export type RustFramework = "actix-web" | "axum" | "rama";
 export type Framework = RustFramework | "spring" | "express" | "bun" | "apache" | "nginx";
 
 export type Source =
@@ -28,7 +28,7 @@ export interface Candidate {
 export const STATIC_ROUTES: readonly Route[] = ["/16k", "/323k", "/file"];
 
 export function isRust(f: Framework): f is RustFramework {
-  return f === "actix-web" || f === "axum";
+  return f === "actix-web" || f === "axum" || f === "rama";
 }
 
 /** Whether a candidate serves a route. */
@@ -51,6 +51,7 @@ export const CANDIDATES: readonly Candidate[] = [
   { id: "actix-web-4.18.2", framework: "actix-web", label: "actix-web 4.18.2", source: { kind: "crates", version: "4.18.2" } },
   { id: "actix-web-4.19.0", framework: "actix-web", label: "actix-web 4.19.0", source: { kind: "crates", version: "4.19.0" } },
   { id: "axum-0.8.9", framework: "axum", label: "axum 0.8.9", source: { kind: "crates", version: "0.8.9" } },
+  { id: "rama-0.4.0", framework: "rama", label: "rama 0.4.0", source: { kind: "crates", version: "0.4.0" } },
   {
     id: "actix-web-81bb997",
     framework: "actix-web",
@@ -95,7 +96,7 @@ export const CANDIDATES: readonly Candidate[] = [
 ];
 
 export const LANES: Record<LaneId, Lane> = {
-  frameworks: { id: "frameworks", candidates: ["actix-web-4.19.0", "axum-0.8.9", "spring-boot-4.1.2", "express-5.3.0", "bun-1.4.4", "apache-2.4", "nginx-1.30.6"] },
+  frameworks: { id: "frameworks", candidates: ["actix-web-4.19.0", "axum-0.8.9", "rama-0.4.0", "spring-boot-4.1.2", "express-5.3.0", "bun-1.4.4", "apache-2.4", "nginx-1.30.6"] },
   // the second change run: #4302 with its fixes against the main it now merges into, axum left out to keep six
   // passes inside the budget (ADR 0001, "Cells" and "Budget")
   change: {
@@ -108,11 +109,19 @@ export const LANES: Record<LaneId, Lane> = {
 /**
  * The crates of a framework's workspace that a git candidate must take from its commit. actix-web's own
  * crates depend on each other by crates.io version, actix-files on actix-web itself, so each needs a patch;
- * axum's reach axum-core by path inside the same checkout, so none do.
+ * axum's and rama's reach their sibling crates by path inside the same checkout, so none do.
  */
 export const WORKSPACE_CRATES: Record<RustFramework, readonly string[]> = {
   "actix-web": ["actix-web", "actix-http", "actix-router", "actix-web-codegen", "actix-files"],
   axum: [],
+  rama: [],
+};
+
+/** The features a framework's docs build an HTTP server with, when its default features hold none. */
+export const FEATURES: Record<RustFramework, readonly string[]> = {
+  "actix-web": [],
+  axum: [],
+  rama: ["http-full"],
 };
 
 export function candidate(id: string): Candidate {
@@ -137,11 +146,15 @@ export function planCandidates(lane: Lane, named: string): Candidate[] {
 export function manifestParts(c: Candidate): { framework: string; patch: string } {
   const framework = c.framework;
   if (!isRust(framework) || c.source.kind === "release") throw new Error(`${c.id} has no Cargo manifest`);
-  if (c.source.kind === "crates") return { framework: `${framework} = "=${c.source.version}"`, patch: "" };
+  const features = FEATURES[framework].length === 0 ? "" : `, features = [${FEATURES[framework].map((f) => JSON.stringify(f)).join(", ")}]`;
+  if (c.source.kind === "crates") {
+    const version = `"=${c.source.version}"`;
+    return { framework: features === "" ? `${framework} = ${version}` : `${framework} = { version = ${version}${features} }`, patch: "" };
+  }
   const at = `git = "${c.source.repo}", rev = "${c.source.rev}"`;
   const crates = WORKSPACE_CRATES[framework];
   return {
-    framework: `${framework} = { ${at} }`,
+    framework: `${framework} = { ${at}${features} }`,
     patch: crates.length === 0 ? "" : ["[patch.crates-io]", ...crates.map((name) => `${name} = { ${at} }`)].join("\n"),
   };
 }

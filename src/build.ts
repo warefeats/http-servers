@@ -13,7 +13,7 @@ import { arg } from "./cli";
 const ROOT = resolve(import.meta.dir, "..");
 
 /** Crates whose resolved version the record keeps for every candidate. */
-export const WATCHED = ["tokio", "mio", "bytes", "socket2", "hyper", "hyper-util", "http", "actix-http", "actix-web", "actix-server", "actix-rt", "actix-files", "axum", "axum-core", "tower-http", "serde_json"];
+export const WATCHED = ["tokio", "mio", "bytes", "socket2", "hyper", "hyper-util", "http", "actix-http", "actix-web", "actix-server", "actix-rt", "actix-files", "axum", "axum-core", "tower-http", "rama", "rama-http-core", "serde_json"];
 
 interface LockPackage {
   name: string;
@@ -40,7 +40,7 @@ export function foreignPackages(packages: LockPackage[], c: Candidate): string[]
   const own = new Set<string>([framework, ...WORKSPACE_CRATES[framework]]);
   if (c.framework === "axum") own.add("axum-core");
   return packages
-    .filter((p) => !(own.has(p.name) && (p.source === undefined || p.source.startsWith("git+") || p.source.startsWith("registry+"))))
+    .filter((p) => !((own.has(p.name) || (c.framework === "rama" && p.name.startsWith("rama-"))) &&(p.source === undefined || p.source.startsWith("git+") || p.source.startsWith("registry+"))))
     .filter((p) => !p.name.startsWith("bench-"))
     .map((p) => `${p.name} ${p.version} ${p.source ?? "path"}`)
     .sort();

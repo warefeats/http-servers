@@ -51,6 +51,7 @@ interface SiteSection {
 const FRAMEWORKS: Record<Framework, Omit<SiteCandidate, "id" | "version" | "statistics" | "samplesMs">> = {
   "actix-web": { name: "actix-web", homepage: "https://actix.rs" },
   axum: { name: "axum", homepage: "https://github.com/tokio-rs/axum" },
+  rama: { name: "rama", homepage: "https://ramaproxy.org" },
   spring: { name: "Spring Boot", homepage: "https://spring.io/projects/spring-boot" },
   express: { name: "Express", homepage: "https://expressjs.com" },
   bun: { name: "Bun", homepage: "https://bun.sh" },
@@ -205,9 +206,9 @@ if (import.meta.main) {
       if (typeof c !== "object" || c === null || !("id" in c) || !("versions" in c) || typeof c.id !== "string" || typeof c.versions !== "object" || c.versions === null) continue;
       const v = new Map<string, unknown>(Object.entries(c.versions));
       const framework = candidate(c.id).framework;
-      if (framework === "actix-web" || framework === "axum") {
+      if (framework === "actix-web" || framework === "axum" || framework === "rama") {
         const own = v.get(framework);
-        const httpName = framework === "axum" ? "hyper" : "actix-http";
+        const httpName = framework === "axum" ? "hyper" : framework === "rama" ? "rama-http-core" : "actix-http";
         const http = v.get(httpName);
         if (typeof own === "string") versions[c.id] = typeof http === "string" ? `${own} (${httpName} ${http})` : own;
       } else {

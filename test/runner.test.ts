@@ -33,6 +33,8 @@ describe("candidates", () => {
 
   test("a crates.io candidate pins the exact version and patches nothing", () => {
     expect(manifestParts(candidate("actix-web-4.18.1"))).toEqual({ framework: 'actix-web = "=4.18.1"', patch: "" });
+    // rama's default features hold no HTTP, so its candidate asks for the feature its docs build servers with
+    expect(manifestParts(candidate("rama-0.4.0"))).toEqual({ framework: 'rama = { version = "=0.4.0", features = ["http-full"] }', patch: "" });
   });
 
   test("a git actix-web candidate takes every workspace crate from its commit", () => {
@@ -409,7 +411,7 @@ describe("run", () => {
     for (const cell of ["323k", "slow-323k", "file", "16k"] as const) {
       const c = protocol("frameworks", "full", false).cells.find((x) => x.id === cell);
       if (!c) throw new Error(cell);
-      expect(arms(fw, 1, c, null)).toHaveLength(7);
+      expect(arms(fw, 1, c, null)).toHaveLength(8);
     }
     expect(serves({ routes: STATIC_ROUTES }, "/file")).toBe(true);
     expect(serves({}, "/json")).toBe(true);

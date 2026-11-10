@@ -30,7 +30,7 @@
    "stepped": true,
    "verdict": {
     "winnerId": "actix-web",
-    "headline": "actix-web 480,000 responses/s, axum 256,000 responses/s, Spring Boot 120,000 responses/s, Express 104,000 responses/s, Bun 320,000 responses/s",
+    "headline": "actix-web 480,000 responses/s, axum 251,000 responses/s, Spring Boot 128,000 responses/s, Express 107,000 responses/s, Bun 320,000 responses/s",
     "summary": ""
    },
    "candidates": [
@@ -240,7 +240,7 @@
    "stepped": true,
    "verdict": {
     "winnerId": "",
-    "headline": "actix-web 352,000 responses/s, axum 352,000 responses/s, Spring Boot 120,000 responses/s, Express 88,000 responses/s, Bun 256,000 responses/s, Apache httpd 48,000 responses/s, nginx 352,000 responses/s",
+    "headline": "actix-web 352,000 responses/s, axum 352,000 responses/s, Spring Boot 123,000 responses/s, Express 90,700 responses/s, Bun 267,000 responses/s, Apache httpd 49,300 responses/s, nginx 352,000 responses/s",
     "summary": ""
    },
    "candidates": [
@@ -528,7 +528,7 @@
    "stepped": true,
    "verdict": {
     "winnerId": "",
-    "headline": "actix-web 18,000 responses/s, axum 18,000 responses/s, Spring Boot 18,000 responses/s, Express 13,000 responses/s, Bun 18,000 responses/s, Apache httpd 18,000 responses/s, nginx 18,000 responses/s",
+    "headline": "actix-web 18,000 responses/s, axum 18,000 responses/s, Spring Boot 18,000 responses/s, Express 13,300 responses/s, Bun 18,000 responses/s, Apache httpd 18,000 responses/s, nginx 18,000 responses/s",
     "summary": ""
    },
    "candidates": [
@@ -1026,7 +1026,7 @@
    "stepped": true,
    "verdict": {
     "winnerId": "actix-web",
-    "headline": "actix-web 36,000 responses/s, axum 26,000 responses/s, Spring Boot 22,000 responses/s, Express 20,000 responses/s, Bun 32,000 responses/s",
+    "headline": "actix-web 36,000 responses/s, axum 26,700 responses/s, Spring Boot 21,300 responses/s, Express 20,000 responses/s, Bun 32,000 responses/s",
     "summary": ""
    },
    "candidates": [
@@ -1445,7 +1445,7 @@
    "lowerIsBetter": true,
    "verdict": {
     "winnerId": "",
-    "headline": "actix-web 18 MB, axum 30 MB, Spring Boot 110 MB, Express 90 MB, Bun 192 MB, Apache httpd 49 MB, nginx 17 MB",
+    "headline": "actix-web 17.7 MB, axum 29.5 MB, Spring Boot 113 MB, Express 90.1 MB, Bun 198 MB, Apache httpd 49.1 MB, nginx 17.2 MB",
     "summary": ""
    },
    "candidates": [
@@ -1697,7 +1697,7 @@
    "lowerIsBetter": true,
    "verdict": {
     "winnerId": "",
-    "headline": "actix-web 264 MB, axum 284 MB, Spring Boot 430 MB, Express 352 MB, Bun 214 MB",
+    "headline": "actix-web 270 MB, axum 288 MB, Spring Boot 424 MB, Express 356 MB, Bun 227 MB",
     "summary": ""
    },
    "candidates": [
@@ -1881,7 +1881,7 @@
    "lowerIsBetter": true,
    "verdict": {
     "winnerId": "",
-    "headline": "actix-web 50 MB, axum 34 MB, Spring Boot 803 MB, Express 323 MB, Bun 82 MB",
+    "headline": "actix-web 50.5 MB, axum 33.7 MB, Spring Boot 792 MB, Express 323 MB, Bun 79.8 MB",
     "summary": ""
    },
    "candidates": [
@@ -2065,7 +2065,7 @@
    "lowerIsBetter": true,
    "verdict": {
     "winnerId": "",
-    "headline": "actix-web 225 MB, axum 252 MB, Spring Boot 2,247 MB, Express 507 MB, Bun 274 MB",
+    "headline": "actix-web 227 MB, axum 248 MB, Spring Boot 2,260 MB, Express 492 MB, Bun 279 MB",
     "summary": ""
    },
    "candidates": [
@@ -2249,7 +2249,7 @@
    "lowerIsBetter": false,
    "verdict": {
     "winnerId": "",
-    "headline": "actix-web 49 Gbit/s, axum 49 Gbit/s, Spring Boot 49 Gbit/s, Express 38 Gbit/s, Bun 49 Gbit/s, Apache httpd 49 Gbit/s, nginx 49 Gbit/s",
+    "headline": "actix-web 49.2 Gbit/s, axum 49.2 Gbit/s, Spring Boot 48.9 Gbit/s, Express 38.4 Gbit/s, Bun 49.2 Gbit/s, Apache httpd 49.2 Gbit/s, nginx 49.1 Gbit/s",
     "summary": ""
    },
    "candidates": [

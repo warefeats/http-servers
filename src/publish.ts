@@ -85,7 +85,8 @@ function topStep(rec: CellRecord): StepRecord | undefined {
 }
 
 const round = (n: number, digits: number) => Math.round(n * 10 ** digits) / 10 ** digits;
-const fmt = (n: number) => Math.round(n).toLocaleString("en-US");
+/** A headline value to three significant figures, as the site's charts print it. */
+const fmt = (n: number) => Number(n.toPrecision(3)).toLocaleString("en-US");
 
 /**
  * The ADR's ranking: the higher (or lower) mean wins when the 95% t-intervals of the passes don't overlap; otherwise
@@ -194,7 +195,7 @@ export function sections(runs: readonly RunFile[], versions: Record<string, stri
       return { id: framework, ...look, version: versions[c.id] ?? c.label.replace(/^\S+\s+/, ""), statistics: statistics(samples), samplesMs: samples, metrics: m.metrics(recs) };
     });
     const winnerId = m.ranked ? rank(Object.fromEntries(candidates.map((c) => [c.id, c.samplesMs])), m.lowerIsBetter) : "";
-    const line = candidates.map((c) => `${c.name} ${fmt(c.statistics.medianMs)} ${m.unit}`).join(", ");
+    const line = candidates.map((c) => `${c.name} ${fmt(c.statistics.meanMs)} ${m.unit}`).join(", ");
     const stepped = cell.kind === "capacity" ? { stepped: true as const } : {};
     return [{ id: cell.id, title: text.title, deck: text.deck, unit: m.unit, lowerIsBetter: m.lowerIsBetter, ...stepped, verdict: { winnerId, headline: line, summary: "" }, candidates }];
   });

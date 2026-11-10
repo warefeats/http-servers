@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "http-servers-2026-11",
+  "slug": "http-servers",
+  "post": "2026-11-09-http-servers-actix-web-vs-axum-vs-spring-boot-vs-express-vs-bun-vs-apache-httpd-vs-nginx",
+  "category": "HTTP servers",
+  "title": "actix-web vs axum vs Spring Boot vs Express vs Bun vs Apache httpd vs nginx",
+  "deck": "Seven HTTP servers on 4 Graviton4 cores, each at its documented setup: the most responses a second each holds at p99 ≤ 50 ms, what 1,000 slow clients cost it in memory, and how fast it serves a 64 MiB file.",
+  "unit": "ms",
+  "lowerIsBetter": false,
+  "sectionSamples": "repeats",
+  "verdict": {
+    "winnerId": "actix-web",
+    "headline": "actix-web 4.19.0 led all three JSON routes, at 1.5 times Bun and 1.9 times axum on small JSON. On the 323 KB bodies and the 64 MiB file, every server but Express reached the network's limit.",
+    "summary": "actix-web answered small JSON on 8.2 µs of CPU a response, against 12.5 for Bun and 14.7 for axum. With 1,000 slow clients on a shared 323 KB body, actix-web and nginx held 18 and 17 MB, axum 30, Apache httpd 49 and Bun 198, while Spring Boot reached 2.3 GB on the 323 KB JSON. On the 16 KB body actix-web, axum and nginx tied at 352,000 responses a second, about 46 Gbit/s. Serving the 64 MiB file, Bun, nginx and Apache httpd spent 2.5 to 3.6 ms of CPU a download, about a tenth of the 25 to 30 ms actix-web, axum and Spring Boot spent."
+  },
+  "limitations": [
+    "The server ran on 4 of a c8gn.4xlarge's 16 Graviton4 cores, with its client on a second c8gn.4xlarge in the same placement group: one instance size, one architecture, plain HTTP/1.1 and no TLS.",
+    "Every server ran its documented setup without tuning, Spring Boot with no JVM flags. Every server but Bun takes actix-web's listen backlog of 1,024 from its own settings; Bun.serve has no such setting.",
+    "Apache httpd and nginx serve files, not code, so they sit out the JSON routes and the body built per request.",
+    "The fastest servers reached the 50 Gbps link on the 16 KB and 323 KB bodies and on the file (46 to 49 Gbit/s), so those routes have no winner; they show who falls short of it.",
+    "Capacity is found by doubling the offered rate and then bisecting three times, so two servers within an eighth of each other can land on the same step.",
+    "Apache httpd, at the 150 workers Ubuntu's packaged configuration allows, served the 1,000 slow clients at 1,521 responses a second against about 3,400 for the rest, with a 30-second p99.",
+    "Three passes, each on a fresh pair of instances. A route has a winner only when the passes' 95% intervals don't overlap.",
+    "Peak memory growth is VmHWM summed over a server's processes, so Express, Bun, Apache httpd and nginx, which run several, count each one's peak.",
+    "I wrote actix-web #4302 and #4404, the changes in actix-http 3.21.0 that stop copying large response bodies into the write buffer."
+  ],
+  "trademarks": [
+    "actix-web is a project of the actix organization.",
+    "axum is a project of the tokio-rs organization.",
+    "Spring is a trademark of Broadcom Inc. and/or its subsidiaries.",
+    "Express and Node.js are projects of the OpenJS Foundation.",
+    "Bun is part of Anthropic.",
+    "Apache and Apache HTTP Server are trademarks of The Apache Software Foundation.",
+    "NGINX is a trademark of F5, Inc.",
+    "Java and OpenJDK are trademarks or registered trademarks of Oracle and/or its affiliates."
+  ],
+  "runs": [
+    "runs/2026-11-09-aws-graviton4.json"
+  ]
+}

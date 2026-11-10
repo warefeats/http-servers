@@ -1,0 +1,140 @@
+{
+  "builtAt": "2026-11-09T08:29:41.463Z",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+  "arch": "arm64",
+  "candidates": [
+    {
+      "id": "actix-web-4.19.0",
+      "label": "actix-web 4.19.0",
+      "framework": "actix-web",
+      "source": {
+        "kind": "crates",
+        "version": "4.19.0"
+      },
+      "binary": "/opt/bench/build/bin/actix-web-4.19.0",
+      "sha256": "dee5056fd07f793e17eea83681eae4a5ea973f72b639bedc85c167d172343e6a",
+      "bytes": 6955200,
+      "seconds": 17.8,
+      "versions": {
+        "tokio": "1.54.1",
+        "mio": "1.2.4",
+        "bytes": "1.12.1",
+        "socket2": "0.6.5",
+        "http": "0.2.12",
+        "actix-http": "3.21.0",
+        "actix-web": "4.19.0",
+        "actix-server": "2.10.0",
+        "actix-rt": "2.15.0",
+        "actix-files": "0.7.4",
+        "serde_json": "1.0.154"
+      }
+    },
+    {
+      "id": "axum-0.8.9",
+      "label": "axum 0.8.9",
+      "framework": "axum",
+      "source": {
+        "kind": "crates",
+        "version": "0.8.9"
+      },
+      "binary": "/opt/bench/build/bin/axum-0.8.9",
+      "sha256": "0c4bc1fcf1a9eb9c835a1ca0639ac66b4537fe8bfd876b126bf4545236e02ff0",
+      "bytes": 2435936,
+      "seconds": 8.9,
+      "versions": {
+        "tokio": "1.54.1",
+        "mio": "1.2.4",
+        "bytes": "1.12.1",
+        "socket2": "0.6.5",
+        "hyper": "1.12.0",
+        "hyper-util": "0.1.21",
+        "http": "1.5.0",
+        "axum": "0.8.9",
+        "axum-core": "0.5.6",
+        "tower-http": "0.6.11",
+        "serde_json": "1.0.154"
+      }
+    },
+    {
+      "id": "spring-boot-4.1.2",
+      "label": "Spring Boot 4.1.2",
+      "framework": "spring",
+      "source": {
+        "kind": "release",
+        "version": "4.1.2",
+        "runtime": "OpenJDK 25, Ubuntu's openjdk-25-jre-headless"
+      },
+      "binary": "/opt/bench/build/bin/spring-boot-4.1.2",
+      "sha256": "a39d84ed03130d4c6de45a00afaf165d195f251feb1d66fdbf7a3bc69dc0091f",
+      "bytes": 19967429,
+      "seconds": 7.6,
+      "versions": {
+        "spring-boot": "4.1.2",
+        "java (build)": "openjdk version \"25.0.5.0.3\" 2026-10-24"
+      }
+    },
+    {
+      "id": "express-5.3.0",
+      "label": "Express 5.3.0",
+      "framework": "express",
+      "source": {
+        "kind": "release",
+        "version": "5.3.0",
+        "runtime": "Node.js 26.13.0"
+      },
+      "binary": "/opt/bench/build/bin/express-5.3.0",
+      "sha256": "533e1dd8bf8d5529be30b40fbb0baf69ba9d6abbca0b330f1d0d5f700f2d6d93",
+      "bytes": 0,
+      "seconds": 0.6,
+      "versions": {
+        "express": "5.3.0"
+      }
+    },
+    {
+      "id": "bun-1.4.4",
+      "label": "Bun 1.4.4",
+      "framework": "bun",
+      "source": {
+        "kind": "release",
+        "version": "1.4.4",
+        "runtime": "Bun 1.4.4"
+      },
+      "binary": "/opt/bench/build/bin/bun-1.4.4",
+      "sha256": "718a6c0073e6fcaef0782e5f4cd033b0222641b7fbc02befefe7f7ba1a45f758",
+      "bytes": 0,
+      "seconds": 0,
+      "versions": {}
+    },
+    {
+      "id": "apache-2.4",
+      "label": "Apache httpd 2.4",
+      "framework": "apache",
+      "source": {
+        "kind": "release",
+        "version": "2.4",
+        "runtime": "Ubuntu 24.04's apache2, event MPM"
+      },
+      "binary": "/opt/bench/build/bin/apache-2.4",
+      "sha256": "6f42151c5487fc7ebcd23be9b4194d2d8f8618317d9dc2b69569fd91ae5f5a21",
+      "bytes": 0,
+      "seconds": 0,
+      "versions": {}
+    },
+    {
+      "id": "nginx-1.30.6",
+      "label": "nginx 1.30.6",
+      "framework": "nginx",
+      "source": {
+        "kind": "release",
+        "version": "1.30.6",
+        "runtime": "nginx.org's stable package for Ubuntu 24.04"
+      },
+      "binary": "/opt/bench/build/bin/nginx-1.30.6",
+      "sha256": "58088e47cc8d5b67ebcc58aa070a68133e57d4da5ae5028eeb908e8300462074",
+      "bytes": 0,
+      "seconds": 0,
+      "versions": {}
+    }
+  ]
+}

@@ -27,6 +27,7 @@
    "deck": "A 1 KB JSON document built and serialized on every request: the highest rate held at p99 ≤ 50 ms.",
    "unit": "responses/s",
    "lowerIsBetter": false,
+   "stepped": true,
    "verdict": {
     "winnerId": "actix-web",
     "headline": "actix-web 480,000 responses/s, axum 256,000 responses/s, Spring Boot 120,000 responses/s, Express 104,000 responses/s, Bun 320,000 responses/s",
@@ -236,6 +237,7 @@
    "deck": "16,384 bytes from one shared buffer, or a file for Apache httpd and nginx, under actix-web's 32 KiB write-buffer threshold.",
    "unit": "responses/s",
    "lowerIsBetter": false,
+   "stepped": true,
    "verdict": {
     "winnerId": "",
     "headline": "actix-web 352,000 responses/s, axum 352,000 responses/s, Spring Boot 120,000 responses/s, Express 88,000 responses/s, Bun 256,000 responses/s, Apache httpd 48,000 responses/s, nginx 352,000 responses/s",
@@ -523,6 +525,7 @@
    "deck": "323,000 bytes cloned from one shared buffer, as a server answers from a cache, or a file for Apache httpd and nginx.",
    "unit": "responses/s",
    "lowerIsBetter": false,
+   "stepped": true,
    "verdict": {
     "winnerId": "",
     "headline": "actix-web 18,000 responses/s, axum 18,000 responses/s, Spring Boot 18,000 responses/s, Express 13,000 responses/s, Bun 18,000 responses/s, Apache httpd 18,000 responses/s, nginx 18,000 responses/s",
@@ -810,6 +813,7 @@
    "deck": "The same 323,000 bytes copied into a new buffer on every request.",
    "unit": "responses/s",
    "lowerIsBetter": false,
+   "stepped": true,
    "verdict": {
     "winnerId": "",
     "headline": "actix-web 18,000 responses/s, axum 18,000 responses/s, Spring Boot 18,000 responses/s, Express 10,000 responses/s, Bun 18,000 responses/s",
@@ -1019,6 +1023,7 @@
    "deck": "A 263-item JSON document, 40,039 bytes, built and serialized on every request.",
    "unit": "responses/s",
    "lowerIsBetter": false,
+   "stepped": true,
    "verdict": {
     "winnerId": "actix-web",
     "headline": "actix-web 36,000 responses/s, axum 26,000 responses/s, Spring Boot 22,000 responses/s, Express 20,000 responses/s, Bun 32,000 responses/s",
@@ -1228,6 +1233,7 @@
    "deck": "A 2,100-item JSON document, 323,142 bytes, built and serialized on every request.",
    "unit": "responses/s",
    "lowerIsBetter": false,
+   "stepped": true,
    "verdict": {
     "winnerId": "actix-web",
     "headline": "actix-web 5,000 responses/s, axum 3,250 responses/s, Spring Boot 3,250 responses/s, Express 3,000 responses/s, Bun 4,000 responses/s",

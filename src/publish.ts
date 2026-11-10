@@ -43,6 +43,8 @@ interface SiteSection {
   deck: string;
   unit: string;
   lowerIsBetter: boolean;
+  /** A capacity is the highest step a search held, so independent passes can land on the same value. */
+  stepped?: true;
   verdict: { winnerId: string; headline: string; summary: string };
   candidates: SiteCandidate[];
 }
@@ -193,7 +195,8 @@ export function sections(runs: readonly RunFile[], versions: Record<string, stri
     });
     const winnerId = m.ranked ? rank(Object.fromEntries(candidates.map((c) => [c.id, c.samplesMs])), m.lowerIsBetter) : "";
     const line = candidates.map((c) => `${c.name} ${fmt(c.statistics.medianMs)} ${m.unit}`).join(", ");
-    return [{ id: cell.id, title: text.title, deck: text.deck, unit: m.unit, lowerIsBetter: m.lowerIsBetter, verdict: { winnerId, headline: line, summary: "" }, candidates }];
+    const stepped = cell.kind === "capacity" ? { stepped: true as const } : {};
+    return [{ id: cell.id, title: text.title, deck: text.deck, unit: m.unit, lowerIsBetter: m.lowerIsBetter, ...stepped, verdict: { winnerId, headline: line, summary: "" }, candidates }];
   });
 }
 

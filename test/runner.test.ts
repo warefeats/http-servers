@@ -450,6 +450,8 @@ describe("run", () => {
     expect(json?.candidates.map((c) => c.id)).toEqual(["actix-web", "bun"]);
     expect(json?.verdict.winnerId).toBe("actix-web");
     expect(out.find((s) => s.id === "16k")?.candidates.map((c) => c.id)).toEqual(["actix-web", "bun", "apache"]);
+    expect(json?.stepped).toBe(true);
+    expect(out.find((s) => s.id === "slow-323k")?.stepped).toBeUndefined();
   });
 
   test("a static web server runs only the cells of the routes it serves", () => {

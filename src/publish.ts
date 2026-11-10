@@ -241,7 +241,8 @@ if (import.meta.main) {
     schemaVersion: 1,
     id,
     label: arg("label") ?? "AWS Graviton4, c8gn.4xlarge server and client",
-    publishedAt: new Date().toISOString(),
+    // the site reads a date, YYYY-MM-DD, and the post's slug starts with it: the run id's date, else today's
+    publishedAt: /^\d{4}-\d{2}-\d{2}/.exec(id)?.[0] ?? new Date().toISOString().slice(0, 10),
     environment: {
       machine: "AWS c8gn.4xlarge server, its processes pinned to 4 of 16 cores, and a c8gn.4xlarge client, one cluster placement group",
       chip: "AWS Graviton4",

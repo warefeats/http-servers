@@ -2,7 +2,7 @@
  "schemaVersion": 1,
  "id": "2026-11-09-aws-graviton4",
  "label": "AWS Graviton4, c8gn.4xlarge server and client",
- "publishedAt": "2026-11-10T02:59:11.520Z",
+ "publishedAt": "2026-11-09",
  "environment": {
   "machine": "AWS c8gn.4xlarge server, its processes pinned to 4 of 16 cores, and a c8gn.4xlarge client, one cluster placement group",
   "chip": "AWS Graviton4",

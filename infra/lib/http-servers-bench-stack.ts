@@ -22,6 +22,8 @@ export const SHUTDOWN_MINUTES = 330;
 export const BUN_VERSION = "1.4.0";
 export const OHA_VERSION = "1.16.0";
 export const OHA_SHA256 = "99a790eb8c3e0feaca974bd6b32f0f8d4426a0c5b289f39e833e5b2c7529cd39";
+/** curl for every download: GitHub's release redirects answer 504 in bursts, and curl retries those. */
+export const CURL = "curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors";
 
 const UBUNTU_ARM64 = "/aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id";
 const RUST_ENV = "RUSTUP_HOME=/opt/rust/rustup CARGO_HOME=/opt/rust/cargo";
@@ -55,12 +57,17 @@ export function userDataCommands(role: Role): string[] {
     // the slow-client cell (docs/adr/0001, Hardware): fq paces each flow on the server, netem adds the client's round trip
     kernelModule(role === "server" ? "sch_fq" : "sch_netem"),
     // Ubuntu 24.04 has no awscli package: v2 from Amazon, for this machine's architecture
-    'curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip',
+    `${CURL} "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip`,
     "unzip -q /tmp/awscliv2.zip -d /tmp",
     "/tmp/aws/install",
     "rm -rf /tmp/awscliv2.zip /tmp/aws",
     "aws --version",
-    `curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}"`,
+    // the release zip, checked against the sums it publishes (bun.sh/install downloads it without retrying)
+    `${CURL} -o /tmp/bun-linux-aarch64.zip https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-aarch64.zip`,
+    `${CURL} https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/SHASUMS256.txt | grep " bun-linux-aarch64.zip$" | (cd /tmp && sha256sum -c -)`,
+    "unzip -q -o /tmp/bun-linux-aarch64.zip -d /tmp",
+    "install -m 755 /tmp/bun-linux-aarch64/bun /usr/local/bin/bun",
+    "rm -rf /tmp/bun-linux-aarch64 /tmp/bun-linux-aarch64.zip",
     "bun --version",
   ];
   if (role === "server") {
@@ -72,7 +79,7 @@ export function userDataCommands(role: Role): string[] {
     // whole machine; SSM's environment has neither variable and only a minimal PATH, so each rustup proxy gets a
     // wrapper in /usr/local/bin that sets them
     `export ${RUST_ENV}`,
-    "curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable",
+    `${CURL} --proto '=https' --tlsv1.2 https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable`,
     "for tool in /opt/rust/cargo/bin/*; do",
     `  printf '#!/bin/sh\\nexport ${RUST_ENV}\\nexec %s "$@"\\n' "$tool" > "/usr/local/bin/\${tool##*/}"`,
     '  chmod 755 "/usr/local/bin/${tool##*/}"',
@@ -80,7 +87,7 @@ export function userDataCommands(role: Role): string[] {
     "env -u RUSTUP_HOME -u CARGO_HOME rustc --version",
     "env -u RUSTUP_HOME -u CARGO_HOME cargo --version",
     // the load generator (docs/adr/0001, Hardware), checked against the release's published binary
-    `curl -fsSL -o /tmp/oha https://github.com/hatoo/oha/releases/download/v${OHA_VERSION}/oha-linux-arm64`,
+    `${CURL} -o /tmp/oha https://github.com/hatoo/oha/releases/download/v${OHA_VERSION}/oha-linux-arm64`,
     `echo "${OHA_SHA256}  /tmp/oha" | sha256sum -c -`,
     "install -m 755 /tmp/oha /usr/local/bin/oha",
     "rm -f /tmp/oha",

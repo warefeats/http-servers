@@ -12,7 +12,7 @@ import { errorRate, gbitPerS, generatorShortfall, netemCommand, parsePass, parse
 import { mergePasses, ohaArgs, parseOha, shares } from "../src/oha";
 import { groupMemory, groupPids, groupTicks, hostTicks, parseEthtool } from "../src/proc";
 import { type Cell, connectionsFor, hasAaArm, protocol } from "../src/protocol";
-import { rank, sections } from "../src/publish";
+import { rank, runtimes, sections } from "../src/publish";
 import { arms, type CellRecord, type RunFile } from "../src/run";
 import { bootstrapMedian, median, overlaps, tInterval, verdict } from "../src/stats";
 import { cpuCount, firstCpus, parseWrk, wrkArgs, wrkDuration } from "../src/wrk";
@@ -398,6 +398,20 @@ describe("run", () => {
     expect(rank({ "actix-web": [24.0, 23.5, 24.4], axum: [2.7, 2.9, 2.6] }, true)).toBe("axum");
     // one pass, as a smoke has, ranks nothing
     expect(rank({ "actix-web": [512_000], axum: [256_000] }, false)).toBe("");
+  });
+
+  test("publish: the runtimes line names every runtime the run's host and build recorded", () => {
+    const host = {
+      "runtime java": 'openjdk version "25.0.5.0.3" 2026-10-24',
+      "runtime node": "v26.13.0",
+      "runtime bun": "1.4.4",
+      "runtime apache2": "Server version: Apache/2.4.58 (Ubuntu)",
+      "runtime nginx": "nginx version: nginx/1.30.6",
+    };
+    expect(runtimes(host, "rustc 1.99.1 (58cf8f9c3 2026-10-13)")).toBe(
+      "Rust release builds with rustc 1.99.1, OpenJDK 25.0.5, Node.js 26.13.0, Bun 1.4.4, Apache httpd 2.4.58 and nginx 1.30.6",
+    );
+    expect(runtimes({}, "rustc 1.99.1 (58cf8f9c3 2026-10-13)")).toBe("Rust release builds with rustc 1.99.1");
   });
 
   test("publish: a static-only server sits out the routes it doesn't serve, and those routes are still ranked", () => {

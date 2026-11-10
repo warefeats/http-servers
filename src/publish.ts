@@ -63,14 +63,14 @@ const SECTIONS: Partial<Record<Cell["id"], { title: string; deck: string }>> = {
   json: { title: "Small JSON", deck: "A 1 KB JSON document built and serialized on every request: the highest rate held at p99 ≤ 50 ms." },
   "json-40k": { title: "40 KB JSON", deck: "A 263-item JSON document, 40,039 bytes, built and serialized on every request." },
   "json-323k": { title: "323 KB JSON", deck: "A 2,100-item JSON document, 323,142 bytes, built and serialized on every request." },
-  "16k": { title: "16 KB body", deck: "16,384 bytes from one shared buffer, under actix-web's 32 KiB write-buffer threshold." },
-  "323k": { title: "323 KB shared body", deck: "323,000 bytes cloned from one shared buffer, as a server answers from a cache." },
+  "16k": { title: "16 KB body", deck: "16,384 bytes from one shared buffer, or a file for Apache httpd and nginx, under actix-web's 32 KiB write-buffer threshold." },
+  "323k": { title: "323 KB shared body", deck: "323,000 bytes cloned from one shared buffer, as a server answers from a cache, or a file for Apache httpd and nginx." },
   "323k-fresh": { title: "323 KB body built per request", deck: "The same 323,000 bytes copied into a new buffer on every request." },
   "slow-323k": { title: "Slow clients, 323 KB shared body", deck: "Peak memory growth with 1,000 keep-alive clients, each paced at 10 Mbit/s with 40 ms added round trip." },
   "slow-323k-fresh": { title: "Slow clients, 323 KB body built per request", deck: "Peak memory growth with 1,000 slow keep-alive clients on the per-request body." },
   "slow-json-40k": { title: "Slow clients, 40 KB JSON", deck: "Peak memory growth with 1,000 slow keep-alive clients on the 40 KB JSON document." },
   "slow-json-323k": { title: "Slow clients, 323 KB JSON", deck: "Peak memory growth with 1,000 slow keep-alive clients on the 323 KB JSON document." },
-  file: { title: "64 MiB file", deck: "64 keep-alive clients downloading a 64 MiB file through each framework's own file server, nothing shaped." },
+  file: { title: "64 MiB file", deck: "64 keep-alive clients downloading a 64 MiB file through each server's own file serving, nothing shaped." },
 };
 
 function statistics(samples: readonly number[]): Statistics {
@@ -159,6 +159,21 @@ function measureFor(cell: Cell): Measure | null {
   return null;
 }
 
+/** The runtimes a framework run used: rustc from its build record, the rest as the agent recorded them. */
+export function runtimes(host: Record<string, string>, rustc: string | undefined): string {
+  const pick = (key: string, re: RegExp) => re.exec(host[`runtime ${key}`] ?? "")?.[1];
+  const named: [string, string | undefined][] = [
+    ["Rust release builds with rustc", /rustc (\S+)/.exec(rustc ?? "")?.[1]],
+    ["OpenJDK", pick("java", /version "(\d+(?:\.\d+){0,2})/)],
+    ["Node.js", pick("node", /v?(\d+\.\d+\.\d+)/)],
+    ["Bun", pick("bun", /(\d+\.\d+\.\d+)/)],
+    ["Apache httpd", pick("apache2", /Apache\/(\S+)/)],
+    ["nginx", pick("nginx", /nginx\/(\S+)/)],
+  ];
+  const parts = named.filter(([, v]) => v).map(([name, v]) => `${name} ${v}`);
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : (parts[0] ?? "");
+}
+
 /** One section per cell of the lane, with the candidates that serve its route, in the run's order. */
 export function sections(runs: readonly RunFile[], versions: Record<string, string>): SiteSection[] {
   const first = runs[0];
@@ -198,8 +213,10 @@ if (import.meta.main) {
   if (!first) throw new Error("usage: bun run src/publish.ts --id=<date>-aws-graviton4 --label=<label> <results.json> ...");
   // the crate versions every pass's build resolved, by candidate (build-record.json beside each pass's results)
   const versions: Record<string, string> = {};
+  let rustc: string | undefined;
   for (const path of files) {
     const record: unknown = JSON.parse(readFileSync(join(path, "..", "..", "build-record.json"), "utf8"));
+    if (typeof record === "object" && record !== null && "rustc" in record && typeof record.rustc === "string") rustc ??= record.rustc;
     if (typeof record !== "object" || record === null || !("candidates" in record) || !Array.isArray(record.candidates)) continue;
     for (const c of record.candidates) {
       if (typeof c !== "object" || c === null || !("id" in c) || !("versions" in c) || typeof c.id !== "string" || typeof c.versions !== "object" || c.versions === null) continue;
@@ -211,8 +228,11 @@ if (import.meta.main) {
         const http = v.get(httpName);
         if (typeof own === "string") versions[c.id] = typeof http === "string" ? `${own} (${httpName} ${http})` : own;
       } else {
-        const src = candidate(c.id).source;
-        if (src.kind === "release") versions[c.id] = `${src.version} (${src.runtime})`;
+        const { source: src, label } = candidate(c.id);
+        if (src.kind !== "release") continue;
+        // Ubuntu's apache2 is named by its series; the agent recorded the exact build
+        const version = (framework === "apache" ? /Apache\/(\S+)/.exec(first.host["runtime apache2"] ?? "")?.[1] : undefined) ?? src.version;
+        versions[c.id] = src.runtime === label ? version : `${version} (${src.runtime})`;
       }
     }
   }
@@ -223,20 +243,20 @@ if (import.meta.main) {
     label: arg("label") ?? "AWS Graviton4, c8gn.4xlarge server and client",
     publishedAt: new Date().toISOString(),
     environment: {
-      machine: "AWS c8gn.4xlarge server, its process pinned to 4 of 16 cores, and a c8gn.4xlarge client, one cluster placement group",
+      machine: "AWS c8gn.4xlarge server, its processes pinned to 4 of 16 cores, and a c8gn.4xlarge client, one cluster placement group",
       chip: "AWS Graviton4",
       cores: "4 (server)",
       memory: "32 GiB each",
       os: `Ubuntu 24.04 LTS arm64, kernel ${first.host["kernel"] ?? ""}`,
       arch: "arm64",
-      runtime: `Release builds at each framework's defaults; ${first.host["oha"] ?? "oha"}; plain HTTP/1.1 keep-alive, no TLS, 50 Gbps between the instances`,
+      runtime: `Each server at its documented setup: ${runtimes(first.host, rustc)}; ${first.host["oha"] ?? "oha"}; plain HTTP/1.1 keep-alive, no TLS, 50 Gbps between the instances`,
     },
     protocol: {
       warmups: first.protocol.warmupS,
       runs: runs.length,
-      processModel: "A fresh server process per cell; each framework sizes itself to the server's 4 cores; both listen through the same socket2 code with actix-web's backlog of 1,024",
-      cacheState: "Bodies built per request where the route says so, otherwise from one shared buffer; the 64 MiB file stays in the page cache",
-      output: "Capacity: the highest open-loop rate held with p99 at most 50 ms, at most 0.1% errors and at least 95% delivered, doubling then bisecting three times; CPU per response from the server's user plus system time; peak memory growth from VmHWM",
+      processModel: "A fresh server process group per cell on the server's 4 cores, each server sizing its own workers; every server but Bun listens with actix-web's backlog of 1,024 from its own settings, since Bun.serve has none",
+      cacheState: "JSON built on every request; byte bodies from one shared buffer, or a new one per request on /323k-fresh, while Apache httpd and nginx serve them as files; the 64 MiB file stays in the page cache",
+      output: "Capacity: the highest open-loop rate held with p99 at most 50 ms, at most 0.1% errors and at least 95% delivered, doubling then bisecting three times; CPU per response from the server's user plus system time and peak memory growth from VmHWM, each summed over its processes",
       clientSizing: `${first.host["ohaProcesses"] ?? "8"} oha processes, open loop with latency correction; 1,000 paced clients in the slow cells; 64 in the file cell`,
     },
     sections: sections(runs, versions),

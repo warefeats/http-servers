@@ -3,13 +3,14 @@ set -e
 export HOME=/root RUSTUP_HOME=/opt/rust/rustup CARGO_HOME=/opt/rust/cargo
 # Build, on the client: the lane's candidates in release mode (docs/adr/0001, Builds), then the binaries for the
 # server and the build record to the bucket. An empty candidate list is the lane's default set.
-# Spring's Maven build needs a JDK, and Express's npm install the Node.js release the server runs (docs/adr/0001,
-# Builds); Rust is already here, from user data
+# Spring's Maven build needs a JDK, Express's npm install the Node.js release the server runs, and rama's build
+# libclang's headers, since rama-dns runs bindgen over <resolv.h> (docs/adr/0001, Builds); Rust is already here,
+# from user data
 # every download retries: GitHub's release redirects answer 504 in bursts, and curl retries those
 fetch() { curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors "$@"; }
 apt-get -o DPkg::Lock::Timeout=600 -qq update
 DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -qq -y install --no-install-recommends \
-  openjdk-25-jdk-headless xz-utils >/dev/null
+  openjdk-25-jdk-headless xz-utils libclang-dev >/dev/null
 node_version=v26.13.0
 cd /tmp
 fetch -O "https://nodejs.org/dist/$node_version/node-$node_version-linux-arm64.tar.xz"

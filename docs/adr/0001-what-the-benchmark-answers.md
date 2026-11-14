@@ -52,6 +52,7 @@ Facts the design rests on, checked on 2026-11-05:
 ### Builds
 
 - Every candidate is built with `cargo build --release` for the rig's architecture on the rig's client instance (the same Graviton4 generation as the server), with the stable rustc of the day, recorded. The framework comes from crates.io at an exact version, or from a git commit with every crate of its workspace patched to that commit.
+- Amended 2026-11-13, before any pass of rama: rama-dns 0.4.0's build script runs bindgen over `<resolv.h>` on Linux, and bindgen needs libclang with its headers, so the client installs `libclang-dev` before it builds, as it installs a JDK for Spring and Node.js for Express. Nothing a server runs changes.
 - The two sides of a change-lane pair share one `Cargo.lock`, so they differ only in the framework's own crates; the build compares the two lockfiles and refuses the pair otherwise. Each binary's sha256 and the resolved versions of tokio, mio, bytes, socket2 and hyper are kept with the run.
 
 ### Cells

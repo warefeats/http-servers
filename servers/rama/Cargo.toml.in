@@ -1,0 +1,18 @@
+# The build (src/build.ts) writes one project per candidate from this template, filling the marker
+# lines below: the rama dependency (an exact crates.io version, or a git commit, whose workspace
+# supplies every rama-* crate from the same commit) with the `http-full` feature its docs build
+# HTTP servers with, since rama's default features hold no HTTP; rama needs no [patch] table.
+[package]
+name = "bench-rama"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+@FRAMEWORK@
+bench-common = { path = "@COMMON@" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[workspace]
+
+@PATCH@

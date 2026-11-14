@@ -20,11 +20,11 @@ One bench server per framework in [`servers/`](servers/), written the way each f
 | `/16k` | 16,384 bytes, under actix-web's 32 KiB write-buffer threshold |
 | `/323k` | 323,000 bytes, the size #4302 was measured on, cloned from one shared buffer |
 | `/323k-fresh` | the same 323,000 bytes, copied into a new buffer on every request as a handler builds its own body |
-| `/file` | a 64 MiB file, through the file server each framework's docs use: actix-files' `NamedFile`, tower-http's `ServeFile` |
+| `/file` | a 64 MiB file, through the file server each framework's docs use: actix-files' `NamedFile`, tower-http's `ServeFile`, rama's `ServeFile` |
 
-Seven servers run in the framework lane: actix-web and axum, Spring Boot on OpenJDK 25, Express on Node.js 26, Bun, and Apache httpd and nginx, the last two on the static routes only (`/16k`, `/323k` and `/file`, from files with the same bytes), since neither builds a body per request without a language behind it. Each runs the way its own docs run one in production: Express one worker per CPU through Node's `cluster`, Bun one `Bun.serve` process per CPU with `reusePort`, Spring MVC on its embedded Tomcat, Apache's event MPM and nginx's `worker_processes auto` at their packaged values (ADR 0001, The servers).
+Eight servers run in the framework lane: actix-web, axum and rama, Spring Boot on OpenJDK 25, Express on Node.js 26, Bun, and Apache httpd and nginx, the last two on the static routes only (`/16k`, `/323k` and `/file`, from files with the same bytes), since neither builds a body per request without a language behind it. Each runs the way its own docs run one in production: Express one worker per CPU through Node's `cluster`, Bun one `Bun.serve` process per CPU with `reusePort`, Spring MVC on its embedded Tomcat, Apache's event MPM and nginx's `worker_processes auto` at their packaged values (ADR 0001, The servers).
 
-Every server runs at its framework's defaults: default features, the default release profile, one worker per available CPU, no middleware, Nagle left on. The one equalization is the listen backlog: both listen through the same socket2 code with actix-web's default of 1,024, where axum's documented `tokio::net::TcpListener::bind` would get 128.
+Every server runs at its framework's defaults: default features (rama adds `http-full`, since its defaults hold no HTTP), the default release profile, one worker per available CPU, no middleware, Nagle left on. The one equalization is the listen backlog: both listen through the same socket2 code with actix-web's default of 1,024, where axum's documented `tokio::net::TcpListener::bind` would get 128.
 
 ## Cells
 

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "slug": "2026-11-14-http-servers-actix-web-vs-axum-vs-rama-vs-spring-boot-vs-express-vs-bun-vs-apache-httpd-vs-nginx",
+  "publishedAt": "2026-11-14",
+  "run": "2026-11-14-aws-graviton4",
+  "candidates": [
+    "actix-web",
+    "axum",
+    "rama",
+    "spring",
+    "express",
+    "bun",
+    "apache",
+    "nginx"
+  ],
+  "title": "actix-web vs axum vs rama vs Spring Boot vs Express vs Bun vs Apache httpd vs nginx",
+  "deck": "The first post's seven HTTP servers on the same 4 Graviton4 cores, with rama 0.4.0 as an eighth, each at its documented setup: the most responses a second each holds at p99 ≤ 50 ms, what 1,000 slow clients cost it in memory, and how fast it serves a 64 MiB file.",
+  "verdict": {
+    "winnerId": "actix-web",
+    "headline": "rama 0.4.0 came in behind axum, at 224,000 small-JSON responses a second to axum's 288,000 and Bun's 320,000 and ahead of Spring Boot and Express, and actix-web led small and 323 KB JSON again",
+    "summary": "rama spent 16.8 µs of CPU a small-JSON response against axum's 13.1, and on 40 KB JSON it held 22,000 responses a second to axum's 26,000, at 174 µs a response to axum's 151. On 323 KB JSON the two were close: 3,250 against 3,500, at 1,165 and 1,128 µs. On the 16 KB body rama reached the link's 352,000 in one pass and held 320,000 in the other two, where actix-web, axum and nginx held 352,000 in all three. It reached the network's limit on the 323 KB bodies and the file like every server but Express, at 30.4 ms of CPU a download, the same as axum, and with 1,000 slow clients its memory stayed near axum's: 28 MB to 29 on the shared 323 KB body. The seven servers from the first post landed within a capacity step of their numbers then, apart from Spring Boot, whose 40 KB JSON fell from 22,000 to 15,000 responses a second. Medians of three passes; the section lines show means."
+  },
+  "sections": {
+    "json": "actix-web 491,000 responses/s, axum 272,000 responses/s, rama 219,000 responses/s, Spring Boot 128,000 responses/s, Express 107,000 responses/s, Bun 309,000 responses/s",
+    "16k": "actix-web 352,000 responses/s, axum 352,000 responses/s, rama 331,000 responses/s, Spring Boot 115,000 responses/s, Express 90,700 responses/s, Bun 267,000 responses/s, Apache httpd 48,000 responses/s, nginx 352,000 responses/s",
+    "323k": "actix-web 18,000 responses/s, axum 18,000 responses/s, rama 18,000 responses/s, Spring Boot 18,000 responses/s, Express 13,300 responses/s, Bun 18,000 responses/s, Apache httpd 18,000 responses/s, nginx 18,000 responses/s",
+    "323k-fresh": "actix-web 18,000 responses/s, axum 18,000 responses/s, rama 18,000 responses/s, Spring Boot 18,000 responses/s, Express 10,300 responses/s, Bun 18,000 responses/s",
+    "json-40k": "actix-web 36,000 responses/s, axum 26,700 responses/s, rama 22,000 responses/s, Spring Boot 15,000 responses/s, Express 20,000 responses/s, Bun 34,700 responses/s",
+    "json-323k": "actix-web 5,000 responses/s, axum 3,330 responses/s, rama 3,250 responses/s, Spring Boot 3,080 responses/s, Express 3,000 responses/s, Bun 4,000 responses/s",
+    "slow-323k": "actix-web 17.7 MB, axum 28.6 MB, rama 27.7 MB, Spring Boot 102 MB, Express 88 MB, Bun 181 MB, Apache httpd 50.5 MB, nginx 16.9 MB",
+    "slow-323k-fresh": "actix-web 250 MB, axum 278 MB, rama 274 MB, Spring Boot 438 MB, Express 355 MB, Bun 216 MB",
+    "slow-json-40k": "actix-web 50.5 MB, axum 35.3 MB, rama 32 MB, Spring Boot 829 MB, Express 307 MB, Bun 78.5 MB",
+    "slow-json-323k": "actix-web 197 MB, axum 203 MB, rama 218 MB, Spring Boot 2,030 MB, Express 525 MB, Bun 266 MB",
+    "file": "actix-web 49.1 Gbit/s, axum 49.2 Gbit/s, rama 49.1 Gbit/s, Spring Boot 49.1 Gbit/s, Express 38.6 Gbit/s, Bun 49.1 Gbit/s, Apache httpd 49.1 Gbit/s, nginx 49.2 Gbit/s"
+  },
+  "limitations": [
+    "The server ran on 4 of a c8gn.4xlarge's 16 Graviton4 cores, with its client on a second c8gn.4xlarge in the same placement group: one instance size, one architecture, plain HTTP/1.1 and no TLS.",
+    "Every server ran its documented setup without tuning, Spring Boot with no JVM flags. Every server but Bun takes actix-web's listen backlog of 1,024 from its own settings; Bun.serve has no such setting.",
+    "rama turns on its http-full feature, the one its docs build HTTP servers with, since its default features hold no HTTP, and otherwise runs as shipped: Nagle on, and cleartext HTTP/2 detected on every connection. Its author, Glen De Cauwsemaecker, wrote its server the way rama's examples are (http-servers#13).",
+    "This is rama 0.4.0, its newest release when it ran; 0.5 hadn't shipped.",
+    "Apache httpd and nginx serve files, not code, so they sit out the JSON routes and the body built per request.",
+    "The fastest servers reached the 50 Gbps link on the 16 KB and 323 KB bodies and on the file (46 to 49 Gbit/s), so those routes have no winner; they show who falls short of it.",
+    "Capacity is found by doubling the offered rate and then bisecting three times, so two servers within an eighth of each other can land on the same step.",
+    "Apache httpd, at the 150 workers Ubuntu's packaged configuration allows, served the 1,000 slow clients at 1,511 responses a second against about 3,400 for the rest, with a 30-second p99.",
+    "Three passes, each on a fresh pair of instances. A route has a winner only when the passes' 95% intervals don't overlap.",
+    "Peak memory growth is VmHWM summed over a server's processes, so Express, Bun, Apache httpd and nginx, which run several, count each one's peak.",
+    "Against the 2026-11-09 post: the same rig and setups on new instance pairs, a newer Ubuntu image on the same kernel, and rustc 1.100.0 in place of 1.99.1 for the three Rust servers. Spring Boot's 40 KB JSON fell from 22,000 to 15,000 responses a second and its CPU per response rose 11% on both larger JSON routes; its JDK was the same, and nothing the run records explains it.",
+    "I wrote actix-web #4302 and #4404, the changes in actix-http 3.21.0 that stop copying large response bodies into the write buffer."
+  ]
+}

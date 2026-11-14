@@ -1,0 +1,20 @@
+{
+  "runId": "frameworks-full-43609384559-1-p3",
+  "githubRunId": "43609384559",
+  "lane": "frameworks",
+  "mode": "full",
+  "candidates": "",
+  "pass": 3,
+  "passes": 3,
+  "region": "us-east-1",
+  "zone": "us-east-1a",
+  "ami": "ami-0f6435163a86ffc8c",
+  "serverType": "c8gn.4xlarge",
+  "clientType": "c8gn.4xlarge",
+  "serverInstance": "i-05b6b08c88f699ee1",
+  "clientInstance": "i-0adc6f86dab1e795a",
+  "gitSha": "610f914c1fcea0dfd29c9e8bcd9cb1d132b2770f",
+  "launchedAt": "2026-11-14T18:11:55Z",
+  "startedAt": "2026-11-14T18:15:36Z",
+  "endedAt": "2026-11-14T19:38:14Z"
+}

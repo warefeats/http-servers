@@ -1,0 +1,83 @@
+{
+  "builtAt": "2026-11-14T02:17:36.863Z",
+  "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+  "cargo": "cargo 1.100.0 (3acc79c0c 2026-11-05)",
+  "arch": "arm64",
+  "candidates": [
+    {
+      "id": "actix-web-4.19.0",
+      "label": "actix-web 4.19.0",
+      "framework": "actix-web",
+      "source": {
+        "kind": "crates",
+        "version": "4.19.0"
+      },
+      "binary": "/opt/bench/build/bin/actix-web-4.19.0",
+      "sha256": "4cc93f245107d439478e75ed24601417f00dc69217f73fb2b761326c039dde80",
+      "bytes": 6955320,
+      "seconds": 18,
+      "versions": {
+        "tokio": "1.54.1",
+        "mio": "1.2.5",
+        "bytes": "1.12.1",
+        "socket2": "0.6.5",
+        "http": "0.2.12",
+        "actix-http": "3.21.0",
+        "actix-web": "4.19.0",
+        "actix-server": "2.10.0",
+        "actix-rt": "2.15.0",
+        "actix-files": "0.7.4",
+        "serde_json": "1.0.154"
+      }
+    },
+    {
+      "id": "axum-0.8.9",
+      "label": "axum 0.8.9",
+      "framework": "axum",
+      "source": {
+        "kind": "crates",
+        "version": "0.8.9"
+      },
+      "binary": "/opt/bench/build/bin/axum-0.8.9",
+      "sha256": "01967d92c7a0d722dfaf227872a97d9ce09621260f7807f368bf2fd9717b8207",
+      "bytes": 2429200,
+      "seconds": 9,
+      "versions": {
+        "tokio": "1.54.1",
+        "mio": "1.2.5",
+        "bytes": "1.12.1",
+        "socket2": "0.6.5",
+        "hyper": "1.12.0",
+        "hyper-util": "0.1.21",
+        "http": "1.5.0",
+        "axum": "0.8.9",
+        "axum-core": "0.5.6",
+        "tower-http": "0.6.11",
+        "serde_json": "1.0.154"
+      }
+    },
+    {
+      "id": "rama-0.4.0",
+      "label": "rama 0.4.0",
+      "framework": "rama",
+      "source": {
+        "kind": "crates",
+        "version": "0.4.0"
+      },
+      "binary": "/opt/bench/build/bin/rama-0.4.0",
+      "sha256": "bdcd96959794e8a677979619a6882235fca1396603d65c62758d83d70fc72d67",
+      "bytes": 5274280,
+      "seconds": 38.8,
+      "versions": {
+        "tokio": "1.54.1",
+        "mio": "1.2.5",
+        "bytes": "1.12.1",
+        "socket2": "0.6.5",
+        "http": "1.5.0",
+        "rama": "0.4.0",
+        "rama-http-core": "0.4.0",
+        "serde_json": "1.0.154"
+      }
+    }
+  ]
+}

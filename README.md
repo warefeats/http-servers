@@ -61,3 +61,4 @@ Each measured run keeps its report, results, metadata and build record in `runs/
 - [42170865139](runs/42170865139/report.md) (2026-11-06): the change lane again, six passes on another pair, with the `323k-fresh`, `slow-323k-fresh` and `file` cells added.
 - [42403031469](runs/42403031469/report.md) (2026-11-07): the change lane on #4302 with fixes (c2829f9) against main at 9fb5964, six passes on one pair, with the `json-40k`, `json-323k` and proof cells added and axum left out.
 - [42418739702](runs/42418739702/report.md) (2026-11-08): the same cells on #4302 with fixes 2195876, which copies a body with spare capacity into the write buffer as main does, against main at 9fb5964.
+- [43536591698](runs/43536591698/report.md) (2026-11-13): the framework lane on actix-web 4.19.0, axum 0.8.9 and rama 0.4.0 only, three passes, each on a fresh pair: rama's first passes.

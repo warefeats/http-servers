@@ -1,0 +1,20 @@
+{
+  "runId": "frameworks-full-43536591698-1-p1",
+  "githubRunId": "43536591698",
+  "lane": "frameworks",
+  "mode": "full",
+  "candidates": "actix-web-4.19.0,axum-0.8.9,rama-0.4.0",
+  "pass": 1,
+  "passes": 3,
+  "region": "us-east-1",
+  "zone": "us-east-1b",
+  "ami": "ami-0f6435163a86ffc8c",
+  "serverType": "c8gn.4xlarge",
+  "clientType": "c8gn.4xlarge",
+  "serverInstance": "i-013fde1454e8cb8d3",
+  "clientInstance": "i-0d53c29302f30de63",
+  "gitSha": "df4bca49f95e28f08c74dd333022f99e02ebb9a7",
+  "launchedAt": "2026-11-14T00:48:44Z",
+  "startedAt": "2026-11-14T00:52:12Z",
+  "endedAt": "2026-11-14T01:30:57Z"
+}
